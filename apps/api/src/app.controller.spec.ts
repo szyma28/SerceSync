@@ -15,11 +15,11 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return the handover acknowledgement status payload', () => {
+    it('should return the task accountability status payload', () => {
       expect(appController.getStatus()).toEqual({
         name: 'SerceSync API',
         status: 'ok',
-        phase: 'handover-acknowledgement',
+        phase: 'task-accountability',
       });
     });
   });

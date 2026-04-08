@@ -6,7 +6,7 @@ export class AppService {
     return {
       name: 'SerceSync API',
       status: 'ok',
-      phase: 'handover-acknowledgement',
+      phase: 'task-accountability',
     };
   }
 }
