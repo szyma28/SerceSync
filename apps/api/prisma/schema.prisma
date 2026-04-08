@@ -50,19 +50,20 @@ model Role {
 }
 
 model User {
-  id               String       @id @default(uuid()) @db.Uuid
-  email            String       @unique
-  displayName      String
-  passwordHash     String?
-  isActive         Boolean      @default(true)
-  roleId           String       @db.Uuid
-  role             Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  assignedTasks    Task[]       @relation("AssignedTasks")
-  assignedShifts   Shift[]      @relation("AssignedShifts")
-  auditEvents      AuditEvent[]
-  createdHandovers Handover[]   @relation("CreatedHandovers")
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id                       String                    @id @default(uuid()) @db.Uuid
+  email                    String                    @unique
+  displayName              String
+  passwordHash             String?
+  isActive                 Boolean                   @default(true)
+  roleId                   String                    @db.Uuid
+  role                     Role                      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedTasks            Task[]                    @relation("AssignedTasks")
+  assignedShifts           Shift[]                   @relation("AssignedShifts")
+  auditEvents              AuditEvent[]
+  createdHandovers         Handover[]                @relation("CreatedHandovers")
+  handoverAcknowledgements HandoverAcknowledgement[]
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
 
   @@index([roleId])
   @@map("users")
@@ -86,17 +87,31 @@ model Shift {
 }
 
 model Handover {
-  id          String   @id @default(uuid()) @db.Uuid
-  shiftId     String   @unique @db.Uuid
-  shift       Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  summary     String
-  createdById String?  @db.Uuid
-  createdBy   User?    @relation("CreatedHandovers", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String                    @id @default(uuid()) @db.Uuid
+  shiftId          String                    @unique @db.Uuid
+  shift            Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  summary          String
+  createdById      String?                   @db.Uuid
+  createdBy        User?                     @relation("CreatedHandovers", fields: [createdById], references: [id], onDelete: SetNull)
+  acknowledgements HandoverAcknowledgement[]
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
 
   @@index([createdById])
   @@map("handovers")
+}
+
+model HandoverAcknowledgement {
+  id               String   @id @default(uuid()) @db.Uuid
+  handoverId       String   @db.Uuid
+  handover         Handover @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+  acknowledgedById String   @db.Uuid
+  acknowledgedBy   User     @relation(fields: [acknowledgedById], references: [id], onDelete: Cascade)
+  acknowledgedAt   DateTime @default(now())
+
+  @@unique([handoverId, acknowledgedById])
+  @@index([acknowledgedById])
+  @@map("handover_acknowledgements")
 }
 
 model Task {

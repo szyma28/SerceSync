@@ -25,6 +25,19 @@ The main workflow SerceSync is designed around is:
 3. task completion during shift
 4. manager exceptions dashboard and evidence reporting
 
+## Delivery methodology
+
+The implementation is being delivered as a series of small vertical slices.
+
+Each slice should:
+- solve one meaningful workflow end to end
+- enforce business rules in the API rather than in the clients
+- include test evidence before it is treated as complete
+- produce a supporting feature note in `docs/` for dissertation traceability
+
+The first completed slice is documented in:
+- `docs/requirements/handover-acknowledgement-vertical-slice.md`
+
 ## Technology stack
 
 - Frontend: Flutter and Dart
@@ -149,7 +162,15 @@ pnpm run prisma:generate
 pnpm run db:migrate
 ```
 
-This applies the first Prisma migration and creates the initial barebones backend schema.
+This applies the Prisma migrations and initializes the backend schema.
+
+### 5. Seed the first feature slice
+
+```bash
+pnpm run db:seed
+```
+
+The seed currently creates a demo carer, an active shift, and a handover for the handover acknowledgement flow.
 
 
 ## Environment configuration
@@ -182,8 +203,17 @@ cd apps/mobile
 flutter run
 ```
 
-The scaffold currently targets iOS only, which matches the initial project priority for care staff workflows.
-It currently displays a simple foundation placeholder screen rather than any real application workflow.
+The mobile app now includes the first implemented workflow slice:
+- login with seeded demo credentials
+- current handover display
+- handover acknowledgement
+
+The API base URL defaults to `http://localhost:3000`.
+If you need to override it, pass a Dart define:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://localhost:3000
+```
 
 ### Web app
 
@@ -202,8 +232,11 @@ cd apps/api
 pnpm run start:dev
 ```
 
-The API scaffold includes the initial NestJS configuration, validation, auth support packages, Prisma configuration, and the first database migration.
-Its current root endpoint is still only a simple foundation status response, but the backend data layer is now initialized.
+The API now supports the first workflow slice with:
+- `POST /auth/login`
+- `GET /shifts/current`
+- `GET /handovers/current`
+- `POST /handovers/current/acknowledge`
 
 ### Prisma and database scripts
 
@@ -213,25 +246,34 @@ pnpm run prisma:format
 pnpm run prisma:validate
 pnpm run prisma:generate
 pnpm run db:migrate
+pnpm run db:seed
 pnpm run db:status
 ```
 
 ### Current schema foundation
 
-The first barebones Prisma schema currently includes:
+The current Prisma schema includes:
 
 - `Role`
 - `User`
 - `Shift`
 - `Handover`
+- `HandoverAcknowledgement`
 - `Task`
 - `AuditEvent`
 
-This is still foundation-only setup. It defines the initial data backbone, but it does not yet include real application flows, authentication logic, or business endpoints beyond the scaffold.
+This now supports the first implemented feature slice, but it does not yet include the later task and exception workflows.
+
+## Current demo credentials
+
+After running `pnpm run db:seed`, use:
+
+- email: `carer@sercesync.local`
+- password: `Password123!`
 
 ## Continuous integration
 
-The repository now includes a minimal GitHub Actions workflow in [.github/workflows/ci.yml]
+The repository includes a minimal GitHub Actions workflow in `.github/workflows/ci.yml`.
 It runs on every push to `main` and on every pull request.
 
 ### CI checks

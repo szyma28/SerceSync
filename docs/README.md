@@ -6,3 +6,8 @@ Recommended subfolders:
 - `architecture/` for diagrams, ADRs, and system structure notes
 - `requirements/` for use cases, FRs, NFRs, and traceability material
 - `testing/` for test plans, scenario definitions, and evidence logs
+
+Feature and working-session write-ups should also live here so each implemented slice has a durable explanation record.
+
+Current feature notes:
+- `requirements/handover-acknowledgement-vertical-slice.md`
