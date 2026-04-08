@@ -11,3 +11,4 @@ Feature and working-session write-ups should also live here so each implemented 
 
 Current feature notes:
 - `requirements/handover-acknowledgement-vertical-slice.md`
+- `requirements/task-accountability-backend-slice.md`

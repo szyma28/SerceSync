@@ -91,6 +91,38 @@ async function main() {
     },
   });
 
+  await prisma.task.createMany({
+    data: [
+      {
+        shiftId: shift.id,
+        title: 'Hydration round for Mrs Evans',
+        description:
+          'Confirm fluid intake before breakfast and record whether encouragement was required.',
+        status: 'PENDING',
+        dueAt: new Date(now.getTime() + 30 * 60 * 1000),
+        assignedUserId: user.id,
+      },
+      {
+        shiftId: shift.id,
+        title: 'Observation follow-up for Mr Patel',
+        description:
+          'Repeat observations before lunch and note any changes from the overnight handover.',
+        status: 'PENDING',
+        dueAt: new Date(now.getTime() + 90 * 60 * 1000),
+        assignedUserId: user.id,
+      },
+      {
+        shiftId: shift.id,
+        title: 'Escalate mobility concern review',
+        description:
+          'Check whether the equipment request needs nurse escalation before the afternoon round.',
+        status: 'PENDING',
+        dueAt: new Date(now.getTime() + 2 * 60 * 60 * 1000),
+        assignedUserId: user.id,
+      },
+    ],
+  });
+
   console.log('Seed complete.');
   console.log('Demo login: carer@sercesync.local / Password123!');
 }

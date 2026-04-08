@@ -37,6 +37,7 @@ Each slice should:
 
 The first completed slice is documented in:
 - `docs/requirements/handover-acknowledgement-vertical-slice.md`
+- `docs/requirements/task-accountability-backend-slice.md`
 
 ## Technology stack
 
@@ -171,6 +172,7 @@ pnpm run db:seed
 ```
 
 The seed currently creates a demo carer, an active shift, and a handover for the handover acknowledgement flow.
+It also creates demo tasks for the task accountability backend slice.
 
 
 ## Environment configuration
@@ -237,6 +239,12 @@ The API now supports the first workflow slice with:
 - `GET /shifts/current`
 - `GET /handovers/current`
 - `POST /handovers/current/acknowledge`
+- `GET /tasks/current`
+- `POST /tasks/:id/complete`
+- `POST /tasks/:id/defer`
+- `POST /tasks/:id/escalate`
+
+The task accountability endpoints are currently backend-only. They are ready for client integration, but the mobile and web apps do not yet expose them in the UI.
 
 ### Prisma and database scripts
 
@@ -262,7 +270,12 @@ The current Prisma schema includes:
 - `Task`
 - `AuditEvent`
 
-This now supports the first implemented feature slice, but it does not yet include the later task and exception workflows.
+This now supports:
+
+- the handover acknowledgement vertical slice
+- the task accountability backend slice
+
+It does not yet include the later manager exception reporting workflow in the client applications.
 
 ## Current demo credentials
 

@@ -115,18 +115,20 @@ model HandoverAcknowledgement {
 }
 
 model Task {
-  id             String       @id @default(uuid()) @db.Uuid
-  shiftId        String       @db.Uuid
-  shift          Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  title          String
-  description    String?
-  status         TaskStatus   @default(PENDING)
-  dueAt          DateTime?
-  assignedUserId String?      @db.Uuid
-  assignedUser   User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  auditEvents    AuditEvent[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id              String       @id @default(uuid()) @db.Uuid
+  shiftId         String       @db.Uuid
+  shift           Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  status          TaskStatus   @default(PENDING)
+  dueAt           DateTime?
+  statusNote      String?
+  statusUpdatedAt DateTime?
+  assignedUserId  String?      @db.Uuid
+  assignedUser    User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  auditEvents     AuditEvent[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([shiftId, status])
   @@index([assignedUserId])

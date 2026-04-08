@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { HandoversModule } from './handovers/handovers.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ShiftsModule } from './shifts/shifts.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ShiftsModule } from './shifts/shifts.module';
     AuthModule,
     ShiftsModule,
     HandoversModule,
+    TasksModule,
     PrismaModule,
   ],
   controllers: [AppController],
