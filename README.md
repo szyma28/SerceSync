@@ -117,6 +117,14 @@ cp .env.example .env
 
 Adjust values as needed for your local machine.
 
+If your local PostgreSQL role is not `postgres`, update `DATABASE_URL` to match your machine.
+
+Example for a local Homebrew PostgreSQL install on macOS:
+
+```bash
+DATABASE_URL=postgresql://your_local_role@localhost:5432/sercesync?host=/tmp
+```
+
 ### 3. Create the local PostgreSQL database
 
 If PostgreSQL is already running locally, create the development database:
@@ -130,6 +138,18 @@ If you prefer using `psql`:
 ```bash
 psql postgres -c "CREATE DATABASE sercesync;"
 ```
+
+### 4. Initialize the backend database foundation
+
+```bash
+cd apps/api
+pnpm run prisma:format
+pnpm run prisma:validate
+pnpm run prisma:generate
+pnpm run db:migrate
+```
+
+This applies the first Prisma migration and creates the initial barebones backend schema.
 
 
 ## Environment configuration
@@ -182,5 +202,42 @@ cd apps/api
 pnpm run start:dev
 ```
 
-The API scaffold includes the initial NestJS configuration, validation, auth support packages, and Prisma dependencies needed for the next implementation phase.
-Its current root endpoint is only a simple foundation status response.
+The API scaffold includes the initial NestJS configuration, validation, auth support packages, Prisma configuration, and the first database migration.
+Its current root endpoint is still only a simple foundation status response, but the backend data layer is now initialized.
+
+### Prisma and database scripts
+
+```bash
+cd apps/api
+pnpm run prisma:format
+pnpm run prisma:validate
+pnpm run prisma:generate
+pnpm run db:migrate
+pnpm run db:status
+```
+
+### Current schema foundation
+
+The first barebones Prisma schema currently includes:
+
+- `Role`
+- `User`
+- `Shift`
+- `Handover`
+- `Task`
+- `AuditEvent`
+
+This is still foundation-only setup. It defines the initial data backbone, but it does not yet include real application flows, authentication logic, or business endpoints beyond the scaffold.
+
+## Continuous integration
+
+The repository now includes a minimal GitHub Actions workflow in [.github/workflows/ci.yml]
+It runs on every push to `main` and on every pull request.
+
+### CI checks
+
+- `apps/mobile`: `flutter analyze` and `flutter test`
+- `apps/web`: `flutter analyze` and `flutter test`
+- `apps/api`: `pnpm run prisma:generate`, `pnpm run db:deploy`, `pnpm run build`, `pnpm run test`, and `pnpm run test:e2e`
+
+The API CI job uses a temporary PostgreSQL service inside GitHub Actions, so it does not depend on any external hosted database.

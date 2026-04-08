@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: Mobile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+          pub-cache: true
+
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Analyze mobile app
+        working-directory: apps/mobile
+        run: flutter analyze
+
+      - name: Test mobile app
+        working-directory: apps/mobile
+        run: flutter test
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+          pub-cache: true
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: flutter pub get
+
+      - name: Analyze web app
+        working-directory: apps/web
+        run: flutter analyze
+
+      - name: Test web app
+        working-directory: apps/web
+        run: flutter test
+
+  api:
+    name: API
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sercesync
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sercesync"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: test
+      API_PORT: 3000
+      API_BASE_URL: http://localhost:3000
+      JWT_SECRET: test-secret
+      JWT_EXPIRES_IN: 15m
+      WEB_APP_URL: http://localhost:8080
+      MOBILE_APP_SCHEME: sercesync
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sercesync
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/api/pnpm-lock.yaml
+
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        working-directory: apps/api
+        run: pnpm run prisma:generate
+
+      - name: Apply database migrations
+        working-directory: apps/api
+        run: pnpm run db:deploy
+
+      - name: Build API
+        working-directory: apps/api
+        run: pnpm run build
+
+      - name: Run API unit tests
+        working-directory: apps/api
+        run: pnpm run test
+
+      - name: Run API end-to-end tests
+        working-directory: apps/api
+        run: pnpm run test:e2e

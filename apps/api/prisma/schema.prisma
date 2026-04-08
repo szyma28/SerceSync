@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RoleKey {
+  CARER
+  SENIOR_CARER
+  MANAGER
+}
+
+enum ShiftStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  PENDING
+  COMPLETED
+  DEFERRED
+  ESCALATED
+  OVERDUE
+}
+
+enum AuditEventKind {
+  HANDOVER_ACKNOWLEDGED
+  TASK_COMPLETED
+  TASK_DEFERRED
+  TASK_ESCALATED
+  SHIFT_STARTED
+  SHIFT_ENDED
+  USER_LOGIN
+  USER_LOGOUT
+}
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       RoleKey  @unique
+  label     String
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model User {
+  id               String       @id @default(uuid()) @db.Uuid
+  email            String       @unique
+  displayName      String
+  passwordHash     String?
+  isActive         Boolean      @default(true)
+  roleId           String       @db.Uuid
+  role             Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedTasks    Task[]       @relation("AssignedTasks")
+  assignedShifts   Shift[]      @relation("AssignedShifts")
+  auditEvents      AuditEvent[]
+  createdHandovers Handover[]   @relation("CreatedHandovers")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([roleId])
+  @@map("users")
+}
+
+model Shift {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  startsAt      DateTime
+  endsAt        DateTime
+  status        ShiftStatus  @default(PLANNED)
+  handover      Handover?
+  tasks         Task[]
+  assignedUsers User[]       @relation("AssignedShifts")
+  auditEvents   AuditEvent[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, startsAt])
+  @@map("shifts")
+}
+
+model Handover {
+  id          String   @id @default(uuid()) @db.Uuid
+  shiftId     String   @unique @db.Uuid
+  shift       Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  summary     String
+  createdById String?  @db.Uuid
+  createdBy   User?    @relation("CreatedHandovers", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById])
+  @@map("handovers")
+}
+
+model Task {
+  id             String       @id @default(uuid()) @db.Uuid
+  shiftId        String       @db.Uuid
+  shift          Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?
+  status         TaskStatus   @default(PENDING)
+  dueAt          DateTime?
+  assignedUserId String?      @db.Uuid
+  assignedUser   User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  auditEvents    AuditEvent[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([shiftId, status])
+  @@index([assignedUserId])
+  @@index([dueAt])
+  @@map("tasks")
+}
+
+model AuditEvent {
+  id        String         @id @default(uuid()) @db.Uuid
+  kind      AuditEventKind
+  userId    String?        @db.Uuid
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shiftId   String?        @db.Uuid
+  shift     Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  taskId    String?        @db.Uuid
+  task      Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  details   Json?
+  createdAt DateTime       @default(now())
+
+  @@index([kind, createdAt])
+  @@index([userId])
+  @@index([shiftId])
+  @@index([taskId])
+  @@map("audit_events")
+}
