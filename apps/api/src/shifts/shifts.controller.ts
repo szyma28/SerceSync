@@ -13,4 +13,9 @@ export class ShiftsController {
   getCurrentShift(@CurrentUser() user: AuthenticatedUser) {
     return this.shiftsService.getCurrentShiftForUser(user.userId);
   }
+
+  @Get('my')
+  getShiftOverview(@CurrentUser() user: AuthenticatedUser) {
+    return this.shiftsService.getShiftOverviewForUser(user.userId);
+  }
 }

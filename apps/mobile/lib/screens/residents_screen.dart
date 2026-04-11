@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../api/api_client.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
 import 'resident_detail_screen.dart';
 
 class ResidentsScreen extends StatefulWidget {
-  const ResidentsScreen({super.key, required this.currentCarerName});
+  const ResidentsScreen({
+    super.key,
+    required this.apiClient,
+    required this.accessToken,
+    required this.currentCarerName,
+  });
 
+  final SerceSyncApiClient apiClient;
+  final String accessToken;
   final String currentCarerName;
 
   @override
@@ -14,166 +22,259 @@ class ResidentsScreen extends StatefulWidget {
 }
 
 class ResidentsScreenState extends State<ResidentsScreen> {
-  late List<ResidentProfile> _residents;
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<ResidentListItem> _residents = const [];
 
   @override
   void initState() {
     super.initState();
-    _residents = buildDemoResidents();
+    _loadResidents();
   }
 
-  void openResidentByName(String residentName) {
-    final profile = _residents.cast<ResidentProfile?>().firstWhere(
-      (candidate) => candidate?.name == residentName,
-      orElse: () => null,
-    );
-    if (profile == null) return;
-    _openResident(profile);
-  }
-
-  void _replaceProfile(ResidentProfile updated) {
+  Future<void> _loadResidents() async {
     setState(() {
-      _residents = _residents
-          .map((profile) => profile.id == updated.id ? updated : profile)
-          .toList();
+      _isLoading = true;
+      _errorMessage = null;
     });
+
+    try {
+      final residents = await widget.apiClient.getResidents(
+        accessToken: widget.accessToken,
+      );
+      if (!mounted) return;
+      setState(() => _residents = residents);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = error.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Failed to load residents.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  void _openResident(ResidentProfile profile) {
+  void openResidentById(String residentId) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ResidentDetailScreen(
-          profile: profile,
+          residentId: residentId,
+          apiClient: widget.apiClient,
+          accessToken: widget.accessToken,
           currentCarerName: widget.currentCarerName,
-          onProfileChanged: _replaceProfile,
         ),
       ),
     );
+  }
+
+  void _openResident(ResidentListItem resident) {
+    openResidentById(resident.id);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: Text(
-          'Residents',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(220),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Text(
-                'Your floor assignment is visible here as a live resident workspace. Open a resident to review today\'s care context, add structured notes, and prepare for future governed photo evidence features.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.textPrimary,
-                  height: 1.45,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            ..._residents.map(
-              (profile) => _ResidentListCard(
-                profile: profile,
-                onTap: () => _openResident(profile),
-              ),
+    final unitLabel = _residents.isNotEmpty ? _residents.first.unitLabel : null;
+    final floorNumber = _residents.isNotEmpty ? _residents.first.floorNumber : null;
+
+    return Container(
+      decoration: AppTheme.atmosphericBackground,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: Text(
+            'Residents',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          actions: [
+            IconButton(
+              onPressed: _isLoading ? null : _loadResidents,
+              icon: const Icon(Icons.refresh_rounded),
             ),
           ],
+        ),
+        body: SafeArea(
+          child: _isLoading && _residents.isEmpty
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primaryBlue),
+                )
+              : _errorMessage != null && _residents.isEmpty
+              ? _ResidentsMessageState(
+                  title: 'Couldn\'t load residents',
+                  message: _errorMessage!,
+                  actionLabel: 'Try Again',
+                  onAction: _loadResidents,
+                )
+              : _residents.isEmpty
+              ? const _ResidentsMessageState(
+                  title: 'No residents on this floor right now',
+                  message:
+                      'Residents for the currently assigned floor will appear here once the shift context is active.',
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadResidents,
+                  color: AppTheme.primaryBlue,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                    children: [
+                      _ResidentsScopeCard(
+                        residentCount: _residents.length,
+                        unitLabel: unitLabel ?? 'Assigned floor',
+                        floorNumber: floorNumber ?? 1,
+                      ),
+                      const SizedBox(height: 16),
+                      ..._residents.map(
+                        (resident) => _ResidentListCard(
+                          resident: resident,
+                          onTap: () => _openResident(resident),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
         ),
       ),
     );
   }
 }
 
-class _ResidentListCard extends StatelessWidget {
-  const _ResidentListCard({required this.profile, required this.onTap});
+class _ResidentsScopeCard extends StatelessWidget {
+  const _ResidentsScopeCard({
+    required this.residentCount,
+    required this.unitLabel,
+    required this.floorNumber,
+  });
 
-  final ResidentProfile profile;
+  final int residentCount;
+  final String unitLabel;
+  final int floorNumber;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(225),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryBlueLight,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.apartment_rounded,
+              color: AppTheme.primaryBlueDark,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$residentCount residents loaded',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$unitLabel · Floor $floorNumber',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResidentListCard extends StatelessWidget {
+  const _ResidentListCard({required this.resident, required this.onTap});
+
+  final ResidentListItem resident;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         child: Padding(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(14),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(16),
                 child: Image.asset(
-                  profile.photoAssetPath,
-                  width: 76,
-                  height: 76,
+                  resident.photoAssetPath,
+                  width: 62,
+                  height: 62,
                   fit: BoxFit.cover,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      profile.name,
-                      style: Theme.of(context).textTheme.titleLarge,
+                      resident.fullName,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
-                      profile.room,
+                      resident.roomLabel,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.primaryBlueDark,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
-                      profile.contextLine,
+                      resident.contextLine,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.textSecondary,
-                        height: 1.4,
+                        height: 1.3,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: profile.alerts
-                          .take(2)
-                          .map(
-                            (alert) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.surfaceBackground,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                alert,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
+                    if (resident.alerts.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceBackground,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          resident.alerts.first,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -184,6 +285,55 @@ class _ResidentListCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResidentsMessageState extends StatelessWidget {
+  const _ResidentsMessageState({
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset('assets/images/Resident.png', height: 160),
+            const SizedBox(height: 24),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.headlineSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyLarge,
+              textAlign: TextAlign.center,
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.refresh),
+                label: Text(actionLabel!),
+              ),
+            ],
+          ],
         ),
       ),
     );

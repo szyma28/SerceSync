@@ -5,7 +5,8 @@ class ShiftTask {
     this.description,
     this.dueAt,
     required this.status,
-    this.note,
+    this.statusNote,
+    this.residentId,
     this.residentName,
     this.room,
   });
@@ -19,7 +20,8 @@ class ShiftTask {
           ? null
           : DateTime.parse(json['dueAt'] as String),
       status: json['status'] as String,
-      note: json['note'] as String?,
+      statusNote: json['statusNote'] as String?,
+      residentId: json['residentId'] as String?,
       residentName: json['residentName'] as String?,
       room: json['room'] as String?,
     );
@@ -30,7 +32,10 @@ class ShiftTask {
   final String? description;
   final DateTime? dueAt;
   final String status;
-  final String? note;
+  final String? statusNote;
+  final String? residentId;
   final String? residentName;
   final String? room;
+
+  String? get note => statusNote;
 }

@@ -10,7 +10,66 @@ enum ResidentEntryType {
   mobilityRepositioning,
   medicationNote,
   escalation,
-  photoEvidence,
+}
+
+extension ResidentEntryTypeX on ResidentEntryType {
+  String get apiValue {
+    switch (this) {
+      case ResidentEntryType.careGiven:
+        return 'CARE_GIVEN';
+      case ResidentEntryType.observation:
+        return 'OBSERVATION';
+      case ResidentEntryType.personalCare:
+        return 'PERSONAL_CARE';
+      case ResidentEntryType.nutritionHydration:
+        return 'NUTRITION_HYDRATION';
+      case ResidentEntryType.mobilityRepositioning:
+        return 'MOBILITY_REPOSITIONING';
+      case ResidentEntryType.medicationNote:
+        return 'MEDICATION_NOTE';
+      case ResidentEntryType.escalation:
+        return 'ESCALATION';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case ResidentEntryType.careGiven:
+        return 'Care Given';
+      case ResidentEntryType.observation:
+        return 'Observation';
+      case ResidentEntryType.personalCare:
+        return 'Personal Care';
+      case ResidentEntryType.nutritionHydration:
+        return 'Nutrition / Hydration';
+      case ResidentEntryType.mobilityRepositioning:
+        return 'Mobility / Repositioning';
+      case ResidentEntryType.medicationNote:
+        return 'Medication Note';
+      case ResidentEntryType.escalation:
+        return 'Escalation';
+    }
+  }
+
+  static ResidentEntryType fromApiValue(String value) {
+    switch (value) {
+      case 'CARE_GIVEN':
+        return ResidentEntryType.careGiven;
+      case 'OBSERVATION':
+        return ResidentEntryType.observation;
+      case 'PERSONAL_CARE':
+        return ResidentEntryType.personalCare;
+      case 'NUTRITION_HYDRATION':
+        return ResidentEntryType.nutritionHydration;
+      case 'MOBILITY_REPOSITIONING':
+        return ResidentEntryType.mobilityRepositioning;
+      case 'MEDICATION_NOTE':
+        return ResidentEntryType.medicationNote;
+      case 'ESCALATION':
+      default:
+        return ResidentEntryType.escalation;
+    }
+  }
 }
 
 class PriorityItem {
@@ -23,6 +82,7 @@ class PriorityItem {
     required this.residentName,
     required this.room,
     required this.status,
+    required this.residentId,
     this.sourceTask,
   });
 
@@ -42,6 +102,7 @@ class PriorityItem {
         residentName: task.residentName ?? 'Assigned resident',
         room: task.room ?? 'Room pending',
         status: task.status,
+        residentId: task.residentId,
         sourceTask: task,
       );
     }
@@ -58,6 +119,7 @@ class PriorityItem {
           residentName: task.residentName ?? 'Assigned resident',
           room: task.room ?? 'Room pending',
           status: task.status,
+          residentId: task.residentId,
           sourceTask: task,
         );
       }
@@ -72,6 +134,7 @@ class PriorityItem {
           residentName: task.residentName ?? 'Assigned resident',
           room: task.room ?? 'Room pending',
           status: task.status,
+          residentId: task.residentId,
           sourceTask: task,
         );
       }
@@ -88,6 +151,7 @@ class PriorityItem {
       residentName: task.residentName ?? 'Assigned resident',
       room: task.room ?? 'Room pending',
       status: task.status,
+      residentId: task.residentId,
       sourceTask: task,
     );
   }
@@ -122,55 +186,53 @@ class PriorityItem {
   final String residentName;
   final String room;
   final String status;
+  final String? residentId;
   final ShiftTask? sourceTask;
 }
 
-class ResidentProfile {
-  const ResidentProfile({
+class ResidentListItem {
+  const ResidentListItem({
     required this.id,
-    required this.name,
-    required this.room,
-    required this.photoAssetPath,
-    required this.assignmentContext,
+    required this.fullName,
+    required this.roomLabel,
+    required this.floorNumber,
+    required this.unitLabel,
+    required this.recognitionImageKey,
     required this.todaySummary,
+    required this.assignmentContext,
     required this.contextLine,
     required this.alerts,
-    required this.timeline,
   });
 
-  ResidentProfile copyWith({
-    String? id,
-    String? name,
-    String? room,
-    String? photoAssetPath,
-    String? assignmentContext,
-    String? todaySummary,
-    String? contextLine,
-    List<String>? alerts,
-    List<ResidentTimelineEntry>? timeline,
-  }) {
-    return ResidentProfile(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      room: room ?? this.room,
-      photoAssetPath: photoAssetPath ?? this.photoAssetPath,
-      assignmentContext: assignmentContext ?? this.assignmentContext,
-      todaySummary: todaySummary ?? this.todaySummary,
-      contextLine: contextLine ?? this.contextLine,
-      alerts: alerts ?? this.alerts,
-      timeline: timeline ?? this.timeline,
+  factory ResidentListItem.fromJson(Map<String, dynamic> json) {
+    return ResidentListItem(
+      id: json['id'] as String,
+      fullName: json['fullName'] as String,
+      roomLabel: json['roomLabel'] as String,
+      floorNumber: json['floorNumber'] as int,
+      unitLabel: json['unitLabel'] as String,
+      recognitionImageKey: json['recognitionImageKey'] as String,
+      todaySummary: json['todaySummary'] as String,
+      assignmentContext: json['assignmentContext'] as String,
+      contextLine: json['contextLine'] as String,
+      alerts: (json['alerts'] as List<dynamic>? ?? const [])
+          .map((alert) => alert as String)
+          .toList(),
     );
   }
 
   final String id;
-  final String name;
-  final String room;
-  final String photoAssetPath;
-  final String assignmentContext;
+  final String fullName;
+  final String roomLabel;
+  final int floorNumber;
+  final String unitLabel;
+  final String recognitionImageKey;
   final String todaySummary;
+  final String assignmentContext;
   final String contextLine;
   final List<String> alerts;
-  final List<ResidentTimelineEntry> timeline;
+
+  String get photoAssetPath => residentPhotoAssetPath(recognitionImageKey);
 }
 
 class ResidentTimelineEntry {
@@ -181,7 +243,25 @@ class ResidentTimelineEntry {
     required this.details,
     required this.authorName,
     required this.timestamp,
+    required this.media,
   });
+
+  factory ResidentTimelineEntry.fromJson(Map<String, dynamic> json) {
+    return ResidentTimelineEntry(
+      id: json['id'] as String,
+      type: ResidentEntryTypeX.fromApiValue(json['type'] as String),
+      title: json['title'] as String,
+      details: json['details'] as String,
+      authorName: json['authorName'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      media: (json['media'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) =>
+                ResidentTimelineMediaItem.fromJson(entry as Map<String, dynamic>),
+          )
+          .toList(),
+    );
+  }
 
   final String id;
   final ResidentEntryType type;
@@ -189,6 +269,227 @@ class ResidentTimelineEntry {
   final String details;
   final String authorName;
   final DateTime timestamp;
+  final List<ResidentTimelineMediaItem> media;
+}
+
+class ResidentTimelineMediaItem {
+  const ResidentTimelineMediaItem({
+    required this.id,
+    required this.originalFileName,
+    required this.mediaType,
+    required this.byteSize,
+    required this.downloadPath,
+    required this.createdAt,
+  });
+
+  factory ResidentTimelineMediaItem.fromJson(Map<String, dynamic> json) {
+    return ResidentTimelineMediaItem(
+      id: json['id'] as String,
+      originalFileName: json['originalFileName'] as String,
+      mediaType: json['mediaType'] as String,
+      byteSize: json['byteSize'] as int,
+      downloadPath: json['downloadPath'] as String,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+    );
+  }
+
+  final String id;
+  final String originalFileName;
+  final String mediaType;
+  final int byteSize;
+  final String downloadPath;
+  final DateTime createdAt;
+}
+
+class TimelineEvidenceFile {
+  const TimelineEvidenceFile({
+    required this.fileName,
+    required this.bytes,
+    required this.mediaType,
+  });
+
+  final String fileName;
+  final List<int> bytes;
+  final String mediaType;
+}
+
+class ResidentTaskSummary {
+  const ResidentTaskSummary({
+    required this.id,
+    required this.title,
+    this.description,
+    required this.status,
+    this.dueAt,
+    this.residentId,
+    this.residentName,
+    this.room,
+  });
+
+  factory ResidentTaskSummary.fromJson(Map<String, dynamic> json) {
+    return ResidentTaskSummary(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      description: json['description'] as String?,
+      status: json['status'] as String,
+      dueAt: json['dueAt'] == null
+          ? null
+          : DateTime.parse(json['dueAt'] as String),
+      residentId: json['residentId'] as String?,
+      residentName: json['residentName'] as String?,
+      room: json['room'] as String?,
+    );
+  }
+
+  final String id;
+  final String title;
+  final String? description;
+  final String status;
+  final DateTime? dueAt;
+  final String? residentId;
+  final String? residentName;
+  final String? room;
+}
+
+class ResidentDetail {
+  const ResidentDetail({
+    required this.id,
+    required this.fullName,
+    required this.roomLabel,
+    required this.floorNumber,
+    required this.unitLabel,
+    required this.recognitionImageKey,
+    required this.todaySummary,
+    required this.assignmentContext,
+    required this.contextLine,
+    required this.alerts,
+    required this.currentTasks,
+    required this.timeline,
+  });
+
+  factory ResidentDetail.fromJson(Map<String, dynamic> json) {
+    return ResidentDetail(
+      id: json['id'] as String,
+      fullName: json['fullName'] as String,
+      roomLabel: json['roomLabel'] as String,
+      floorNumber: json['floorNumber'] as int,
+      unitLabel: json['unitLabel'] as String,
+      recognitionImageKey: json['recognitionImageKey'] as String,
+      todaySummary: json['todaySummary'] as String,
+      assignmentContext: json['assignmentContext'] as String,
+      contextLine: json['contextLine'] as String,
+      alerts: (json['alerts'] as List<dynamic>? ?? const [])
+          .map((alert) => alert as String)
+          .toList(),
+      currentTasks: (json['currentTasks'] as List<dynamic>? ?? const [])
+          .map(
+            (task) =>
+                ResidentTaskSummary.fromJson(task as Map<String, dynamic>),
+          )
+          .toList(),
+      timeline: (json['timeline'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) =>
+                ResidentTimelineEntry.fromJson(entry as Map<String, dynamic>),
+          )
+          .toList(),
+    );
+  }
+
+  final String id;
+  final String fullName;
+  final String roomLabel;
+  final int floorNumber;
+  final String unitLabel;
+  final String recognitionImageKey;
+  final String todaySummary;
+  final String assignmentContext;
+  final String contextLine;
+  final List<String> alerts;
+  final List<ResidentTaskSummary> currentTasks;
+  final List<ResidentTimelineEntry> timeline;
+
+  String get photoAssetPath => residentPhotoAssetPath(recognitionImageKey);
+}
+
+class ResidentTimelineEntryDraft {
+  const ResidentTimelineEntryDraft({
+    required this.type,
+    required this.details,
+    this.evidence,
+  });
+
+  final ResidentEntryType type;
+  final String details;
+  final TimelineEvidenceFile? evidence;
+
+  Map<String, dynamic> toJson() {
+    return {'type': type.apiValue, 'details': details};
+  }
+}
+
+class ShiftAssignment {
+  const ShiftAssignment({
+    required this.id,
+    required this.name,
+    required this.startsAt,
+    required this.endsAt,
+    required this.status,
+    required this.floorNumber,
+    required this.unitLabel,
+    this.handoverAcknowledged = false,
+    this.handoverAcknowledgedAt,
+  });
+
+  factory ShiftAssignment.fromJson(Map<String, dynamic> json) {
+    return ShiftAssignment(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      startsAt: DateTime.parse(json['startsAt'] as String),
+      endsAt: DateTime.parse(json['endsAt'] as String),
+      status: json['status'] as String,
+      floorNumber: json['floorNumber'] as int,
+      unitLabel: json['unitLabel'] as String,
+      handoverAcknowledged: json['handoverAcknowledged'] as bool? ?? false,
+      handoverAcknowledgedAt: json['handoverAcknowledgedAt'] == null
+          ? null
+          : DateTime.parse(json['handoverAcknowledgedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String name;
+  final DateTime startsAt;
+  final DateTime endsAt;
+  final String status;
+  final int floorNumber;
+  final String unitLabel;
+  final bool handoverAcknowledged;
+  final DateTime? handoverAcknowledgedAt;
+}
+
+class ShiftOverview {
+  const ShiftOverview({
+    required this.currentShift,
+    required this.assignments,
+  });
+
+  factory ShiftOverview.fromJson(Map<String, dynamic> json) {
+    return ShiftOverview(
+      currentShift: json['currentShift'] == null
+          ? null
+          : ShiftAssignment.fromJson(
+              json['currentShift'] as Map<String, dynamic>,
+            ),
+      assignments: (json['assignments'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ShiftAssignment.fromJson(entry as Map<String, dynamic>),
+          )
+          .toList(),
+    );
+  }
+
+  final ShiftAssignment? currentShift;
+  final List<ShiftAssignment> assignments;
 }
 
 class ShiftRotaEntry {
@@ -207,108 +508,21 @@ class ShiftRotaEntry {
   final String unit;
 }
 
-List<ResidentProfile> buildDemoResidents() {
-  final now = DateTime.now();
-  return [
-    ResidentProfile(
-      id: 'resident-evans',
-      name: 'Mrs Evans',
-      room: 'Room 12A',
-      photoAssetPath: 'assets/images/Resident.png',
-      assignmentContext: 'Assigned to Willow Floor this morning',
-      todaySummary:
-          'Medication due within the hour and a hygiene reminder noted.',
-      contextLine: 'Medication due in 54 min · 3 days since shower logged',
-      alerts: const ['Medication due', 'Personal care reminder'],
-      timeline: [
-        ResidentTimelineEntry(
-          id: 'evans-1',
-          type: ResidentEntryType.personalCare,
-          title: 'Morning wash completed',
-          details:
-              'Supported with fresh clothing and oral care before breakfast.',
-          authorName: 'Alex Carer',
-          timestamp: now.subtract(const Duration(hours: 1, minutes: 20)),
-        ),
-        ResidentTimelineEntry(
-          id: 'evans-2',
-          type: ResidentEntryType.nutritionHydration,
-          title: 'Hydration check',
-          details:
-              'Encouraged fluids and logged half a jug taken with breakfast.',
-          authorName: 'Alex Carer',
-          timestamp: now.subtract(const Duration(minutes: 48)),
-        ),
-      ],
-    ),
-    ResidentProfile(
-      id: 'resident-patel',
-      name: 'Mr Patel',
-      room: 'Room 7B',
-      photoAssetPath: 'assets/images/Resident.png',
-      assignmentContext: 'Assigned to Willow Floor this morning',
-      todaySummary:
-          'Observation follow-up and mobility reassurance remain in focus.',
-      contextLine:
-          'Observation follow-up later today · Mobility review shared in handover',
-      alerts: const ['Observation follow-up', 'Mobility watch'],
-      timeline: [
-        ResidentTimelineEntry(
-          id: 'patel-1',
-          type: ResidentEntryType.observation,
-          title: 'Mood observed as settled',
-          details:
-              'More relaxed after breakfast, still prefers one-to-one reassurance.',
-          authorName: 'Jordan Senior Carer',
-          timestamp: now.subtract(const Duration(hours: 2, minutes: 10)),
-        ),
-        ResidentTimelineEntry(
-          id: 'patel-2',
-          type: ResidentEntryType.mobilityRepositioning,
-          title: 'Mobility support given',
-          details:
-              'Assisted to chair with walking frame and supervised transfer.',
-          authorName: 'Alex Carer',
-          timestamp: now.subtract(const Duration(minutes: 34)),
-        ),
-      ],
-    ),
-    ResidentProfile(
-      id: 'resident-johnson',
-      name: 'Ms Johnson',
-      room: 'Room 4C',
-      photoAssetPath: 'assets/images/Resident.png',
-      assignmentContext: 'Shared across Willow Floor for this shift',
-      todaySummary:
-          'Repositioning timer and skin-integrity photo review are due this afternoon.',
-      contextLine:
-          'Reposition due in 18 min · Photo evidence governance placeholder',
-      alerts: const ['Reposition due', 'Skin integrity review'],
-      timeline: [
-        ResidentTimelineEntry(
-          id: 'johnson-1',
-          type: ResidentEntryType.mobilityRepositioning,
-          title: 'Last reposition recorded',
-          details:
-              'Turn completed with pillow support and pressure area check.',
-          authorName: 'Night Team',
-          timestamp: now.subtract(const Duration(hours: 2, minutes: 42)),
-        ),
-        ResidentTimelineEntry(
-          id: 'johnson-2',
-          type: ResidentEntryType.photoEvidence,
-          title: 'Photo evidence placeholder recorded',
-          details:
-              'Future wound-progress photos will require consent, audit, and secure storage controls.',
-          authorName: 'System note',
-          timestamp: now.subtract(const Duration(hours: 1, minutes: 5)),
-        ),
-      ],
-    ),
-  ];
+String residentPhotoAssetPath(String recognitionImageKey) {
+  switch (recognitionImageKey) {
+    case 'resident-a':
+    case 'resident-b':
+    case 'resident-c':
+    case 'resident-d':
+    default:
+      return 'assets/images/Resident.png';
+  }
 }
 
-List<ShiftRotaEntry> buildDemoRota(DateTime reference) {
+List<ShiftRotaEntry> buildDemoRota(
+  DateTime reference, {
+  String unit = 'Willow Floor',
+}) {
   final dayStart = DateTime(reference.year, reference.month, reference.day);
   return [
     ShiftRotaEntry(
@@ -316,21 +530,21 @@ List<ShiftRotaEntry> buildDemoRota(DateTime reference) {
       label: 'Today',
       startsAt: dayStart.add(const Duration(hours: 7)),
       endsAt: dayStart.add(const Duration(hours: 15, minutes: 30)),
-      unit: 'Willow Floor',
+      unit: unit,
     ),
     ShiftRotaEntry(
       id: 'rota-tomorrow',
       label: 'Tomorrow',
-      startsAt: dayStart.add(const Duration(days: 1, hours: 13)),
-      endsAt: dayStart.add(const Duration(days: 1, hours: 21)),
-      unit: 'Willow Floor',
+      startsAt: dayStart.add(const Duration(days: 1, hours: 7)),
+      endsAt: dayStart.add(const Duration(days: 1, hours: 15, minutes: 30)),
+      unit: unit,
     ),
     ShiftRotaEntry(
       id: 'rota-next',
-      label: 'Monday',
-      startsAt: dayStart.add(const Duration(days: 2, hours: 7)),
-      endsAt: dayStart.add(const Duration(days: 2, hours: 15, minutes: 30)),
-      unit: 'Oak Unit',
+      label: 'Next Scheduled',
+      startsAt: dayStart.add(const Duration(days: 2, hours: 13)),
+      endsAt: dayStart.add(const Duration(days: 2, hours: 21)),
+      unit: unit,
     ),
   ];
 }

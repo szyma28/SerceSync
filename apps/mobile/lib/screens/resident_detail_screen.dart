@@ -1,94 +1,265 @@
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../api/api_client.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
 
 class ResidentDetailScreen extends StatefulWidget {
   const ResidentDetailScreen({
     super.key,
-    required this.profile,
+    required this.residentId,
+    required this.apiClient,
+    required this.accessToken,
     required this.currentCarerName,
-    required this.onProfileChanged,
   });
 
-  final ResidentProfile profile;
+  final String residentId;
+  final SerceSyncApiClient apiClient;
+  final String accessToken;
   final String currentCarerName;
-  final ValueChanged<ResidentProfile> onProfileChanged;
 
   @override
   State<ResidentDetailScreen> createState() => _ResidentDetailScreenState();
 }
 
 class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
-  late ResidentProfile _profile;
+  final ImagePicker _imagePicker = ImagePicker();
+  ResidentDetail? _resident;
+  bool _isLoading = true;
+  bool _isSaving = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _profile = widget.profile;
+    _loadResident();
   }
 
-  Future<void> _openAddEntrySheet() async {
-    final draft = await showModalBottomSheet<_EntryDraft>(
+  Future<void> _loadResident({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final resident = await widget.apiClient.getResidentById(
+        accessToken: widget.accessToken,
+        residentId: widget.residentId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _resident = resident;
+        _errorMessage = null;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = error.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Failed to load resident detail.');
+    } finally {
+      if (mounted && showLoading) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _openAddEntrySheet([ResidentEntryType? initialType]) async {
+    final draft = await showModalBottomSheet<ResidentTimelineEntryDraft>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const _AddEntrySheet(),
+      builder: (context) => _AddEntrySheet(
+        initialType: initialType,
+        onPickEvidence: _pickEvidence,
+      ),
     );
 
     if (draft == null) return;
 
-    final entry = ResidentTimelineEntry(
-      id: 'entry-${DateTime.now().microsecondsSinceEpoch}',
-      type: draft.type,
-      title: draft.title,
-      details: draft.details,
-      authorName: widget.currentCarerName,
-      timestamp: DateTime.now(),
+    setState(() => _isSaving = true);
+    try {
+      await widget.apiClient.createResidentTimelineEntry(
+        accessToken: widget.accessToken,
+        residentId: widget.residentId,
+        draft: draft,
+      );
+      await _loadResident(showLoading: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resident entry added to the timeline.')),
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<TimelineEvidenceFile?> _pickEvidence() async {
+    final selectedFile = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2000,
+      imageQuality: 82,
     );
 
-    setState(() {
-      _profile = _profile.copyWith(timeline: [entry, ..._profile.timeline]);
-    });
-    widget.onProfileChanged(_profile);
+    if (selectedFile == null) {
+      return null;
+    }
+
+    final bytes = await selectedFile.readAsBytes();
+    return TimelineEvidenceFile(
+      fileName: selectedFile.name,
+      bytes: bytes,
+      mediaType: _inferMediaType(selectedFile.name),
+    );
+  }
+
+  String _inferMediaType(String fileName) {
+    final lowerCase = fileName.toLowerCase();
+    if (lowerCase.endsWith('.png')) return 'image/png';
+    if (lowerCase.endsWith('.webp')) return 'image/webp';
+    if (lowerCase.endsWith('.heic')) return 'image/heic';
+    return 'image/jpeg';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(title: Text(_profile.name)),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddEntrySheet,
-        backgroundColor: AppTheme.primaryBlue,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.edit_note_rounded),
-        label: const Text('Add Entry'),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 120),
-          children: [
-            _ResidentHeader(profile: _profile),
-            const SizedBox(height: 20),
-            _TodaySummaryCard(profile: _profile),
-            const SizedBox(height: 20),
-            _QuickActionsStrip(onAddEntry: _openAddEntrySheet),
-            const SizedBox(height: 20),
-            _PhotoGovernanceCard(),
-            const SizedBox(height: 20),
-            Text(
-              'Recent Care Timeline',
-              style: Theme.of(context).textTheme.headlineSmall,
+    if (_isLoading && _resident == null) {
+      return Container(
+        decoration: AppTheme.atmosphericBackground,
+        child: const Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Center(
+            child: CircularProgressIndicator(color: AppTheme.primaryBlue),
+          ),
+        ),
+      );
+    }
+
+    if (_errorMessage != null && _resident == null) {
+      return Container(
+        decoration: AppTheme.atmosphericBackground,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Resident')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Couldn\'t load resident detail',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: _loadResident,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Try Again'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Structured notes keep continuity visible across the shift, including what was done, who logged it, and when.',
-              style: Theme.of(context).textTheme.bodyLarge,
+          ),
+        ),
+      );
+    }
+
+    final resident = _resident!;
+
+    return Container(
+      decoration: AppTheme.atmosphericBackground,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: Text(resident.fullName),
+          actions: [
+            IconButton(
+              onPressed: _isLoading ? null : _loadResident,
+              icon: const Icon(Icons.refresh_rounded),
             ),
-            const SizedBox(height: 18),
-            ..._profile.timeline.map((entry) => _TimelineCard(entry: entry)),
           ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _isSaving ? null : _openAddEntrySheet,
+          backgroundColor: AppTheme.primaryBlue,
+          foregroundColor: Colors.white,
+          icon: _isSaving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.edit_note_rounded),
+          label: Text(_isSaving ? 'Saving…' : 'Add Entry'),
+        ),
+        body: SafeArea(
+          child: RefreshIndicator(
+            onRefresh: _loadResident,
+            color: AppTheme.primaryBlue,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 120),
+              children: [
+                _ResidentHeader(resident: resident),
+                const SizedBox(height: 20),
+                _TodaySummaryCard(resident: resident),
+                const SizedBox(height: 20),
+                Text(
+                  'Recent Care Timeline',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Structured entries keep continuity visible across the shift, including what was recorded, who logged it, and when.',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 18),
+                if (resident.timeline.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(210),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppTheme.borderLight),
+                    ),
+                    child: Text(
+                      'No timeline entries have been recorded yet for this resident.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  )
+                else
+                  ...resident.timeline.map(
+                    (entry) => _TimelineCard(
+                      entry: entry,
+                      apiClient: widget.apiClient,
+                      accessToken: widget.accessToken,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -96,9 +267,9 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
 }
 
 class _ResidentHeader extends StatelessWidget {
-  const _ResidentHeader({required this.profile});
+  const _ResidentHeader({required this.resident});
 
-  final ResidentProfile profile;
+  final ResidentDetail resident;
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +286,7 @@ class _ResidentHeader extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: Image.asset(
-              profile.photoAssetPath,
+              resident.photoAssetPath,
               width: 92,
               height: 92,
               fit: BoxFit.cover,
@@ -127,26 +298,26 @@ class _ResidentHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  profile.name,
+                  resident.fullName,
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  profile.room,
+                  resident.roomLabel,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: AppTheme.primaryBlueDark,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  profile.assignmentContext,
+                  resident.assignmentContext,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: profile.alerts
+                  children: resident.alerts
                       .map(
                         (alert) => Container(
                           padding: const EdgeInsets.symmetric(
@@ -179,9 +350,9 @@ class _ResidentHeader extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({required this.profile});
+  const _TodaySummaryCard({required this.resident});
 
-  final ResidentProfile profile;
+  final ResidentDetail resident;
 
   @override
   Widget build(BuildContext context) {
@@ -194,142 +365,88 @@ class _TodaySummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Today', style: Theme.of(context).textTheme.titleLarge),
+          Text('Current Shift', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 10),
           Text(
-            profile.todaySummary,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceBackground,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.schedule_rounded,
-                  color: AppTheme.warningYellow,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    profile.contextLine,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickActionsStrip extends StatelessWidget {
-  const _QuickActionsStrip({required this.onAddEntry});
-
-  final VoidCallback onAddEntry;
-
-  @override
-  Widget build(BuildContext context) {
-    const actions = [
-      'Care Given',
-      'Observation',
-      'Personal Care',
-      'Nutrition / Hydration',
-      'Mobility / Repositioning',
-      'Medication Note',
-      'Escalation',
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Quick Add', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: actions
-                .map(
-                  (label) => Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: ActionChip(
-                      onPressed: onAddEntry,
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: AppTheme.borderLight),
-                      label: Text(label),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PhotoGovernanceCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppTheme.borderLight),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryBlueLight,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.photo_camera_back_outlined,
-                  color: AppTheme.primaryBlueDark,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  'Photo Evidence Placeholder',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-            ],
+            resident.todaySummary,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(height: 1.45),
           ),
           const SizedBox(height: 14),
           Text(
-            'Identity photos, wound progress photos, and life-event images are part of the future care-evidence model, but this pass keeps them behind governance messaging only. Consent, lawful basis, audit trail, secure storage, and role-based access must be in place before capture or upload goes live.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(height: 1.5),
+            'Current priorities',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
+          const SizedBox(height: 10),
+          if (resident.currentTasks.isEmpty)
+            Text(
+              resident.contextLine,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+            )
+          else
+            ...resident.currentTasks.map(
+              (task) => Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceBackground,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (task.description != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        task.description!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                      '${task.status} ${task.dueAt != null ? '· due ${_formatTime(task.dueAt!)}' : ''}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryBlueDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  static String _formatTime(DateTime value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 }
 
 class _TimelineCard extends StatelessWidget {
-  const _TimelineCard({required this.entry});
+  const _TimelineCard({
+    required this.entry,
+    required this.apiClient,
+    required this.accessToken,
+  });
 
   final ResidentTimelineEntry entry;
+  final SerceSyncApiClient apiClient;
+  final String accessToken;
 
   IconData get _icon {
     switch (entry.type) {
@@ -345,8 +462,6 @@ class _TimelineCard extends StatelessWidget {
         return Icons.medication_outlined;
       case ResidentEntryType.escalation:
         return Icons.trending_up;
-      case ResidentEntryType.photoEvidence:
-        return Icons.photo_library_outlined;
       case ResidentEntryType.careGiven:
         return Icons.task_alt_rounded;
     }
@@ -369,7 +484,7 @@ class _TimelineCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: AppTheme.surfaceBackground,
+              color: AppTheme.primaryBlueLight,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(_icon, color: AppTheme.primaryBlueDark),
@@ -380,24 +495,85 @@ class _TimelineCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry.title,
+                  entry.type.label,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Text(
                   entry.details,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(height: 1.45),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    height: 1.45,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '${entry.authorName} · ${_formatTimestamp(entry.timestamp)}',
+                  '${entry.authorName} · ${_formatDateTime(entry.timestamp)}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primaryBlueDark,
                   ),
                 ),
+                if (entry.media.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    '${entry.media.length} evidence item attached${entry.media.length == 1 ? '' : 's'}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...entry.media.map(
+                    (media) => Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceBackground,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.network(
+                              apiClient.resolveMediaUrl(media.downloadPath),
+                              headers: {
+                                'Authorization': 'Bearer $accessToken',
+                              },
+                              fit: BoxFit.cover,
+                              height: 160,
+                              width: double.infinity,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  height: 120,
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: const Icon(
+                                    Icons.image_not_supported_outlined,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            media.originalFileName,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -406,30 +582,70 @@ class _TimelineCard extends StatelessWidget {
     );
   }
 
-  static String _formatTimestamp(DateTime value) {
+  static String _formatDateTime(DateTime value) {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
   }
 }
 
 class _AddEntrySheet extends StatefulWidget {
-  const _AddEntrySheet();
+  const _AddEntrySheet({
+    this.initialType,
+    required this.onPickEvidence,
+  });
+
+  final ResidentEntryType? initialType;
+  final Future<TimelineEvidenceFile?> Function() onPickEvidence;
 
   @override
   State<_AddEntrySheet> createState() => _AddEntrySheetState();
 }
 
 class _AddEntrySheetState extends State<_AddEntrySheet> {
-  final _titleController = TextEditingController();
+  late ResidentEntryType _selectedType;
   final _detailsController = TextEditingController();
-  ResidentEntryType _selectedType = ResidentEntryType.careGiven;
+  TimelineEvidenceFile? _evidence;
+  bool _isPickingEvidence = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedType = widget.initialType ?? ResidentEntryType.careGiven;
+  }
 
   @override
   void dispose() {
-    _titleController.dispose();
     _detailsController.dispose();
     super.dispose();
+  }
+
+  void _submit() {
+    final details = _detailsController.text.trim();
+    if (details.isEmpty) return;
+
+    Navigator.of(context).pop(
+      ResidentTimelineEntryDraft(
+        type: _selectedType,
+        details: details,
+        evidence: _evidence,
+      ),
+    );
+  }
+
+  Future<void> _attachEvidence() async {
+    setState(() => _isPickingEvidence = true);
+    try {
+      final pickedEvidence = await widget.onPickEvidence();
+      if (!mounted || pickedEvidence == null) return;
+      setState(() => _evidence = pickedEvidence);
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingEvidence = false);
+      }
+    }
   }
 
   @override
@@ -460,92 +676,90 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Add structured note',
+              'Add Structured Entry',
+              textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             DropdownButtonFormField<ResidentEntryType>(
               initialValue: _selectedType,
-              decoration: const InputDecoration(labelText: 'Entry type'),
               items: ResidentEntryType.values
                   .map(
-                    (type) => DropdownMenuItem(
+                    (type) => DropdownMenuItem<ResidentEntryType>(
                       value: type,
-                      child: Text(_labelFor(type)),
+                      child: Text(type.label),
                     ),
                   )
                   .toList(),
               onChanged: (value) {
-                if (value != null) setState(() => _selectedType = value);
+                if (value == null) return;
+                setState(() => _selectedType = value);
               },
+              decoration: const InputDecoration(labelText: 'Entry type'),
             ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(labelText: 'What happened'),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             TextField(
               controller: _detailsController,
-              maxLines: 4,
+              maxLines: 5,
               decoration: const InputDecoration(
                 labelText: 'Details',
                 alignLabelWithHint: true,
               ),
-              onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: 18),
-            FilledButton(
-              onPressed:
-                  _titleController.text.trim().isEmpty ||
-                      _detailsController.text.trim().isEmpty
-                  ? null
-                  : () => Navigator.of(context).pop(
-                      _EntryDraft(
-                        type: _selectedType,
-                        title: _titleController.text.trim(),
-                        details: _detailsController.text.trim(),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _isPickingEvidence ? null : _attachEvidence,
+              icon: _isPickingEvidence
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_a_photo_outlined),
+              label: Text(
+                _evidence == null ? 'Attach photo evidence' : 'Replace photo evidence',
+              ),
+            ),
+            if (_evidence != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceBackground,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        Uint8List.fromList(_evidence!.bytes),
+                        height: 140,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
                       ),
                     ),
-              child: const Text('Save Entry'),
+                    const SizedBox(height: 8),
+                    Text(
+                      _evidence!.fileName,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Save Entry'),
             ),
           ],
         ),
       ),
     );
   }
-
-  static String _labelFor(ResidentEntryType type) {
-    switch (type) {
-      case ResidentEntryType.careGiven:
-        return 'Care Given';
-      case ResidentEntryType.observation:
-        return 'Observation';
-      case ResidentEntryType.personalCare:
-        return 'Personal Care';
-      case ResidentEntryType.nutritionHydration:
-        return 'Nutrition / Hydration';
-      case ResidentEntryType.mobilityRepositioning:
-        return 'Mobility / Repositioning';
-      case ResidentEntryType.medicationNote:
-        return 'Medication Note';
-      case ResidentEntryType.escalation:
-        return 'Escalation';
-      case ResidentEntryType.photoEvidence:
-        return 'Photo Evidence';
-    }
-  }
-}
-
-class _EntryDraft {
-  const _EntryDraft({
-    required this.type,
-    required this.title,
-    required this.details,
-  });
-
-  final ResidentEntryType type;
-  final String title;
-  final String details;
 }
