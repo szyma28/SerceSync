@@ -12,3 +12,5 @@ Feature and working-session write-ups should also live here so each implemented 
 Current feature notes:
 - `requirements/handover-acknowledgement-vertical-slice.md`
 - `requirements/task-accountability-backend-slice.md`
+- `requirements/mobile-workspace-ia-pivot.md`
+- `requirements/mobile-shift-workspace-vertical-slice.md`
