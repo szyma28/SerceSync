@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AuditEventKind, TaskStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -70,6 +74,11 @@ export class TasksService {
     statusNote: string | null;
     statusUpdatedAt: Date | null;
     assignedUserId: string | null;
+    residentId: string | null;
+    resident?: {
+      fullName: string;
+      roomLabel: string;
+    } | null;
   }) {
     return {
       id: task.id,
@@ -80,6 +89,9 @@ export class TasksService {
       statusNote: task.statusNote,
       statusUpdatedAt: task.statusUpdatedAt,
       assignedUserId: task.assignedUserId,
+      residentId: task.residentId,
+      residentName: task.resident?.fullName ?? null,
+      room: task.resident?.roomLabel ?? null,
     };
   }
 
@@ -92,6 +104,9 @@ export class TasksService {
         id: taskId,
         shiftId: shift.id,
         assignedUserId: userId,
+      },
+      include: {
+        resident: true,
       },
     });
 
@@ -128,6 +143,9 @@ export class TasksService {
           statusNote: note,
           statusUpdatedAt: now,
         },
+        include: {
+          resident: true,
+        },
       });
 
       await tx.auditEvent.create({
@@ -161,6 +179,9 @@ export class TasksService {
         shiftId: shift.id,
         assignedUserId: user.userId,
       },
+      include: {
+        resident: true,
+      },
     });
 
     const sortedTasks = tasks.sort((left, right) => {
@@ -188,6 +209,8 @@ export class TasksService {
         startsAt: shift.startsAt,
         endsAt: shift.endsAt,
         status: shift.status,
+        floorNumber: shift.floorNumber,
+        unitLabel: shift.unitLabel,
       },
       currentUser: {
         id: user.userId,

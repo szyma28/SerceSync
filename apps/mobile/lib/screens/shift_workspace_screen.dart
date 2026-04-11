@@ -45,20 +45,24 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
       ),
       ResidentsScreen(
         key: _residentsKey,
+        apiClient: widget.apiClient,
+        accessToken: widget.accessToken,
         currentCarerName: widget.user.displayName,
       ),
       MyShiftScreen(
         user: widget.user,
         snapshot: widget.snapshot,
+        apiClient: widget.apiClient,
+        accessToken: widget.accessToken,
         onLogout: _logout,
       ),
     ];
   }
 
-  void _openResidentFromPriority(String residentName) {
+  void _openResidentFromPriority(String residentId) {
     setState(() => _currentIndex = 1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _residentsKey.currentState?.openResidentByName(residentName);
+      _residentsKey.currentState?.openResidentById(residentId);
     });
   }
 

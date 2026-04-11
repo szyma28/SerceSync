@@ -53,6 +53,8 @@ export class HandoversService {
       startsAt: Date;
       endsAt: Date;
       status: string;
+      floorNumber: number;
+      unitLabel: string;
     },
     handover: {
       id: string;
@@ -71,6 +73,8 @@ export class HandoversService {
         startsAt: shift.startsAt,
         endsAt: shift.endsAt,
         status: shift.status,
+        floorNumber: shift.floorNumber,
+        unitLabel: shift.unitLabel,
       },
       handover: {
         id: handover.id,
@@ -104,27 +108,29 @@ export class HandoversService {
       return this.toResponse(user, shift, handover, acknowledgement);
     }
 
-    const createdAcknowledgement = await this.prisma.$transaction(async (tx) => {
-      const newAcknowledgement = await tx.handoverAcknowledgement.create({
-        data: {
-          handoverId: handover.id,
-          acknowledgedById: user.userId,
-        },
-      });
-
-      await tx.auditEvent.create({
-        data: {
-          kind: 'HANDOVER_ACKNOWLEDGED',
-          userId: user.userId,
-          shiftId: shift.id,
-          details: {
+    const createdAcknowledgement = await this.prisma.$transaction(
+      async (tx) => {
+        const newAcknowledgement = await tx.handoverAcknowledgement.create({
+          data: {
             handoverId: handover.id,
+            acknowledgedById: user.userId,
           },
-        },
-      });
+        });
 
-      return newAcknowledgement;
-    });
+        await tx.auditEvent.create({
+          data: {
+            kind: 'HANDOVER_ACKNOWLEDGED',
+            userId: user.userId,
+            shiftId: shift.id,
+            details: {
+              handoverId: handover.id,
+            },
+          },
+        });
+
+        return newAcknowledgement;
+      },
+    );
 
     return this.toResponse(user, shift, handover, createdAcknowledgement);
   }

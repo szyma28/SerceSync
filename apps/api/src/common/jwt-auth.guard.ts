@@ -20,9 +20,9 @@ export class JwtAuthGuard implements CanActivate {
   constructor(private readonly jwtService: JwtService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<
-      Request & { user?: AuthenticatedUser }
-    >();
+    const request = context
+      .switchToHttp()
+      .getRequest<Request & { user?: AuthenticatedUser }>();
     const authorizationHeader = request.headers.authorization;
 
     if (!authorizationHeader) {
@@ -32,7 +32,9 @@ export class JwtAuthGuard implements CanActivate {
     const [scheme, token] = authorizationHeader.split(' ');
 
     if (scheme !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Authorization header must use Bearer token format.');
+      throw new UnauthorizedException(
+        'Authorization header must use Bearer token format.',
+      );
     }
 
     try {

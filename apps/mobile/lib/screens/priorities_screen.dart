@@ -59,21 +59,7 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
 
   List<PriorityItem> _buildPriorityItems() {
     final now = DateTime.now();
-    final taskItems = _tasks.map((task) => PriorityItem.fromTask(task, now));
-
-    const reminder = PriorityItem(
-      id: 'reminder-shower-evans',
-      title: 'Mrs Evans could do with a shower',
-      summary:
-          'Three days have passed since personal care was last logged, so this should stay visible as a softer reminder.',
-      band: PriorityBand.reminders,
-      timeStateLabel: '3 days since shower logged',
-      residentName: 'Mrs Evans',
-      room: 'Room 12A',
-      status: 'reminder',
-    );
-
-    return [...taskItems, reminder];
+    return _tasks.map((task) => PriorityItem.fromTask(task, now)).toList();
   }
 
   Future<void> _handleMarkSeen(PriorityItem item, String? note) async {
@@ -106,10 +92,12 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
       builder: (context) {
         return _PriorityActionSheet(
           item: item,
-          onOpenResident: () {
-            Navigator.of(context).pop();
-            widget.onOpenResident(item.residentName);
-          },
+          onOpenResident: item.residentId == null
+              ? null
+              : () {
+                  Navigator.of(context).pop();
+                  widget.onOpenResident(item.residentId!);
+                },
           onMarkSeen: (note) async {
             Navigator.of(context).pop();
             try {
@@ -392,13 +380,13 @@ class _PrioritiesErrorState extends StatelessWidget {
 class _PriorityActionSheet extends StatefulWidget {
   const _PriorityActionSheet({
     required this.item,
-    required this.onOpenResident,
     required this.onMarkSeen,
     required this.onEscalate,
+    this.onOpenResident,
   });
 
   final PriorityItem item;
-  final VoidCallback onOpenResident;
+  final VoidCallback? onOpenResident;
   final ValueChanged<String?> onMarkSeen;
   final ValueChanged<String> onEscalate;
 

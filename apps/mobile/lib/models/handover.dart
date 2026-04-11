@@ -39,6 +39,8 @@ class ShiftSummary {
     required this.startsAt,
     required this.endsAt,
     required this.status,
+    required this.floorNumber,
+    required this.unitLabel,
   });
 
   factory ShiftSummary.fromJson(Map<String, dynamic> json) {
@@ -48,6 +50,8 @@ class ShiftSummary {
       startsAt: DateTime.parse(json['startsAt'] as String),
       endsAt: DateTime.parse(json['endsAt'] as String),
       status: json['status'] as String,
+      floorNumber: json['floorNumber'] as int? ?? 1,
+      unitLabel: json['unitLabel'] as String? ?? 'Willow Floor',
     );
   }
 
@@ -56,6 +60,8 @@ class ShiftSummary {
   final DateTime startsAt;
   final DateTime endsAt;
   final String status;
+  final int floorNumber;
+  final String unitLabel;
 }
 
 class HandoverSummary {
