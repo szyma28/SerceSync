@@ -1,6 +1,7 @@
-import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api/api_client.dart';
@@ -14,12 +15,14 @@ class ResidentDetailScreen extends StatefulWidget {
     required this.apiClient,
     required this.accessToken,
     required this.currentCarerName,
+    this.highlightTaskId,
   });
 
   final String residentId;
   final SerceSyncApiClient apiClient;
   final String accessToken;
   final String currentCarerName;
+  final String? highlightTaskId;
 
   @override
   State<ResidentDetailScreen> createState() => _ResidentDetailScreenState();
@@ -27,15 +30,35 @@ class ResidentDetailScreen extends StatefulWidget {
 
 class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
   final ImagePicker _imagePicker = ImagePicker();
+  final GlobalKey _highlightTaskKey = GlobalKey();
+  final Map<String, TextEditingController> _completionControllers = {};
+  Timer? _highlightClearTimer;
+  Timer? _noteSaveConfirmationTimer;
   ResidentDetail? _resident;
   bool _isLoading = true;
   bool _isSaving = false;
+  String? _taskBeingUpdatedId;
+  String? _activeHighlightTaskId;
   String? _errorMessage;
+  final Set<String> _collapsingTaskIds = <String>{};
+  final Set<String> _successStateTaskIds = <String>{};
+  bool _noteSaveConfirmed = false;
 
   @override
   void initState() {
     super.initState();
+    _activeHighlightTaskId = widget.highlightTaskId;
     _loadResident();
+  }
+
+  @override
+  void dispose() {
+    _highlightClearTimer?.cancel();
+    _noteSaveConfirmationTimer?.cancel();
+    for (final controller in _completionControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _loadResident({bool showLoading = true}) async {
@@ -56,6 +79,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         _resident = resident;
         _errorMessage = null;
       });
+      _scheduleHighlightedTaskReveal(resident);
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.message);
@@ -65,6 +89,109 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     } finally {
       if (mounted && showLoading) {
         setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  TextEditingController _completionControllerForTask(String taskId) {
+    return _completionControllers.putIfAbsent(
+      taskId,
+      TextEditingController.new,
+    );
+  }
+
+  bool _isTaskCompletable(ResidentTaskSummary task) {
+    return task.status == 'PENDING' || task.status == 'OVERDUE';
+  }
+
+  void _scheduleHighlightedTaskReveal(ResidentDetail resident) {
+    final taskId = _activeHighlightTaskId;
+    if (taskId == null) {
+      return;
+    }
+
+    final highlightedTaskExists = resident.currentTasks.any(
+      (task) => task.id == taskId,
+    );
+    if (!highlightedTaskExists) {
+      if (mounted) {
+        setState(() => _activeHighlightTaskId = null);
+      }
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealHighlightedTask(taskId);
+    });
+  }
+
+  Future<void> _revealHighlightedTask(String taskId) async {
+    if (!mounted || _activeHighlightTaskId != taskId) {
+      return;
+    }
+
+    final targetContext = _highlightTaskKey.currentContext;
+    if (targetContext != null) {
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+        alignment: 0.18,
+      );
+    }
+
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = Timer(const Duration(milliseconds: 2200), () {
+      if (!mounted || _activeHighlightTaskId != taskId) {
+        return;
+      }
+      setState(() => _activeHighlightTaskId = null);
+    });
+  }
+
+  Future<void> _completeResidentTask(ResidentTaskSummary task) async {
+    if (!_isTaskCompletable(task) || _taskBeingUpdatedId != null) {
+      return;
+    }
+
+    final controller = _completionControllerForTask(task.id);
+    final note = controller.text.trim();
+
+    setState(() => _taskBeingUpdatedId = task.id);
+    try {
+      await widget.apiClient.completeTask(
+        accessToken: widget.accessToken,
+        taskId: task.id,
+        note: note.isEmpty ? null : note,
+      );
+      controller.clear();
+      if (!mounted) return;
+      setState(() {
+        _taskBeingUpdatedId = null;
+        _activeHighlightTaskId = null;
+        _successStateTaskIds.add(task.id);
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 260));
+      if (!mounted) return;
+      setState(() {
+        _successStateTaskIds.remove(task.id);
+        _collapsingTaskIds.add(task.id);
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      await _loadResident(showLoading: false);
+      if (!mounted) return;
+      setState(() => _collapsingTaskIds.remove(task.id));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Priority completed.')));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) {
+        setState(() => _taskBeingUpdatedId = null);
       }
     }
   }
@@ -91,9 +218,12 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       );
       await _loadResident(showLoading: false);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Resident entry added to the timeline.')),
-      );
+      await HapticFeedback.lightImpact();
+      if (!mounted) return;
+      _showNoteSaveConfirmation();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Note saved.')));
     } on ApiException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -102,6 +232,15 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  void _showNoteSaveConfirmation() {
+    _noteSaveConfirmationTimer?.cancel();
+    setState(() => _noteSaveConfirmed = true);
+    _noteSaveConfirmationTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      setState(() => _noteSaveConfirmed = false);
+    });
   }
 
   Future<TimelineEvidenceFile?> _pickEvidence() async {
@@ -199,51 +338,72 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: _isSaving ? null : _openAddEntrySheet,
-          backgroundColor: AppTheme.primaryBlue,
+          backgroundColor: _noteSaveConfirmed
+              ? AppTheme.successGreen
+              : AppTheme.primaryBlue,
           foregroundColor: Colors.white,
-          icon: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: _isSaving
+                ? const SizedBox(
+                    key: ValueKey('saving-note'),
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(
+                    _noteSaveConfirmed
+                        ? Icons.check_circle_rounded
+                        : Icons.edit_note_rounded,
+                    key: ValueKey(_noteSaveConfirmed),
                   ),
-                )
-              : const Icon(Icons.edit_note_rounded),
-          label: Text(_isSaving ? 'Saving…' : 'Add Entry'),
+          ),
+          label: Text(
+            _isSaving
+                ? 'Saving…'
+                : _noteSaveConfirmed
+                ? 'Saved'
+                : 'Add note',
+          ),
         ),
         body: SafeArea(
           child: RefreshIndicator(
             onRefresh: _loadResident,
             color: AppTheme.primaryBlue,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 120),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
               children: [
                 _ResidentHeader(resident: resident),
-                const SizedBox(height: 20),
-                _TodaySummaryCard(resident: resident),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                _TodaySummaryCard(
+                  resident: resident,
+                  highlightTaskId: _activeHighlightTaskId,
+                  taskBeingUpdatedId: _taskBeingUpdatedId,
+                  highlightTaskKey: _highlightTaskKey,
+                  collapsingTaskIds: _collapsingTaskIds,
+                  successStateTaskIds: _successStateTaskIds,
+                  taskNoteController: _completionControllerForTask,
+                  onCompleteTask: _completeResidentTask,
+                ),
+                const SizedBox(height: 16),
                 Text(
-                  'Recent Care Timeline',
+                  'Care notes',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Structured entries keep continuity visible across the shift, including what was recorded, who logged it, and when.',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 12),
                 if (resident.timeline.isEmpty)
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       color: Colors.white.withAlpha(210),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: AppTheme.borderLight),
                     ),
                     child: Text(
-                      'No timeline entries have been recorded yet for this resident.',
+                      'No notes recorded yet.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -274,10 +434,11 @@ class _ResidentHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.borderLight),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: Row(
@@ -287,12 +448,12 @@ class _ResidentHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             child: Image.asset(
               resident.photoAssetPath,
-              width: 92,
-              height: 92,
+              width: 84,
+              height: 84,
               fit: BoxFit.cover,
             ),
           ),
-          const SizedBox(width: 18),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -313,7 +474,7 @@ class _ResidentHeader extends StatelessWidget {
                   resident.assignmentContext,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -321,8 +482,8 @@ class _ResidentHeader extends StatelessWidget {
                       .map(
                         (alert) => Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
+                            horizontal: 9,
+                            vertical: 6,
                           ),
                           decoration: BoxDecoration(
                             color: AppTheme.primaryBlueLight,
@@ -350,84 +511,297 @@ class _ResidentHeader extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({required this.resident});
+  const _TodaySummaryCard({
+    required this.resident,
+    required this.taskNoteController,
+    required this.onCompleteTask,
+    required this.highlightTaskKey,
+    required this.collapsingTaskIds,
+    required this.successStateTaskIds,
+    this.highlightTaskId,
+    this.taskBeingUpdatedId,
+  });
 
   final ResidentDetail resident;
+  final String? highlightTaskId;
+  final String? taskBeingUpdatedId;
+  final GlobalKey highlightTaskKey;
+  final Set<String> collapsingTaskIds;
+  final Set<String> successStateTaskIds;
+  final TextEditingController Function(String taskId) taskNoteController;
+  final Future<void> Function(ResidentTaskSummary task) onCompleteTask;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(220),
-        borderRadius: BorderRadius.circular(24),
+        color: Colors.white.withAlpha(224),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryBlueDark.withAlpha(10),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Current Shift', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 10),
+          Text('Shift summary', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
           Text(
             resident.todaySummary,
             style: Theme.of(
               context,
-            ).textTheme.bodyMedium?.copyWith(height: 1.45),
+            ).textTheme.bodyMedium?.copyWith(height: 1.4),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
-            'Current priorities',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            'Active priorities',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           if (resident.currentTasks.isEmpty)
             Text(
-              resident.contextLine,
+              'No active priorities right now.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
             )
           else
-            ...resident.currentTasks.map(
-              (task) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceBackground,
-                  borderRadius: BorderRadius.circular(18),
+            ...resident.currentTasks.map((task) {
+              final isCollapsing = collapsingTaskIds.contains(task.id);
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 280),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SizeTransition(
+                    sizeFactor: animation,
+                    axisAlignment: -1,
+                    child: child,
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (task.description != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        task.description!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
+                child: isCollapsing
+                    ? SizedBox(key: ValueKey('collapsed-${task.id}'))
+                    : _ResidentTaskCard(
+                        key: task.id == highlightTaskId
+                            ? highlightTaskKey
+                            : ValueKey(task.id),
+                        task: task,
+                        isHighlighted: task.id == highlightTaskId,
+                        isSaving: task.id == taskBeingUpdatedId,
+                        isSuccessState: successStateTaskIds.contains(task.id),
+                        noteController: taskNoteController(task.id),
+                        onComplete: () => onCompleteTask(task),
                       ),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      '${task.status} ${task.dueAt != null ? '· due ${_formatTime(task.dueAt!)}' : ''}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.primaryBlueDark,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+              );
+            }),
         ],
       ),
     );
+  }
+}
+
+class _ResidentTaskCard extends StatelessWidget {
+  const _ResidentTaskCard({
+    super.key,
+    required this.task,
+    required this.isHighlighted,
+    required this.isSaving,
+    required this.isSuccessState,
+    required this.noteController,
+    required this.onComplete,
+  });
+
+  final ResidentTaskSummary task;
+  final bool isHighlighted;
+  final bool isSaving;
+  final bool isSuccessState;
+  final TextEditingController noteController;
+  final VoidCallback onComplete;
+
+  bool get _isCompletable {
+    return task.status == 'PENDING' || task.status == 'OVERDUE';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = isSuccessState
+        ? AppTheme.successGreen
+        : task.status == 'OVERDUE'
+        ? AppTheme.errorRed
+        : AppTheme.primaryBlue;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isSuccessState
+            ? AppTheme.successGreen.withAlpha(14)
+            : isHighlighted
+            ? accentColor.withAlpha(12)
+            : AppTheme.surfaceBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: isSuccessState || isHighlighted
+            ? Border.all(color: accentColor.withAlpha(150), width: 1.6)
+            : Border.all(color: AppTheme.borderLight),
+        boxShadow: isSuccessState || isHighlighted
+            ? [
+                BoxShadow(
+                  color: accentColor.withAlpha(22),
+                  blurRadius: 16,
+                  offset: const Offset(0, 5),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  task.title,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                decoration: BoxDecoration(
+                  color: accentColor.withAlpha(18),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  isSuccessState ? 'Done' : _statusLabel(task.status),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: accentColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (task.description != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              task.description!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            task.dueAt == null
+                ? 'Due this shift'
+                : 'Due ${_formatTime(task.dueAt!)}',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: AppTheme.primaryBlueDark,
+            ),
+          ),
+          if (_isCompletable) ...[
+            const SizedBox(height: 10),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              child: isSuccessState
+                  ? Container(
+                      key: ValueKey('success-${task.id}'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.successGreen.withAlpha(16),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: AppTheme.successGreen,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Marked complete and added to the record.',
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: AppTheme.successGreen,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : Column(
+                      key: ValueKey('entry-${task.id}'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: noteController,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: 'Completion note',
+                            alignLabelWithHint: true,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            onPressed: isSaving ? null : onComplete,
+                            icon: isSaving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.task_alt_rounded),
+                            label: Text(isSaving ? 'Completing…' : 'Complete'),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _statusLabel(String status) {
+    switch (status) {
+      case 'OVERDUE':
+        return 'Overdue';
+      case 'ESCALATED':
+        return 'Escalated';
+      case 'DEFERRED':
+        return 'Deferred';
+      case 'COMPLETED':
+        return 'Completed';
+      case 'PENDING':
+      default:
+        return 'Due';
+    }
   }
 
   static String _formatTime(DateTime value) {
@@ -470,43 +844,46 @@ class _TimelineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.borderLight),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: AppTheme.primaryBlueLight,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(_icon, color: AppTheme.primaryBlueDark),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   entry.type.label,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   entry.details,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppTheme.textSecondary,
-                    height: 1.45,
+                    height: 1.38,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
                   '${entry.authorName} · ${_formatDateTime(entry.timestamp)}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -515,22 +892,22 @@ class _TimelineCard extends StatelessWidget {
                   ),
                 ),
                 if (entry.media.isNotEmpty) ...[
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
                   Text(
-                    '${entry.media.length} evidence item attached${entry.media.length == 1 ? '' : 's'}',
+                    '${entry.media.length} attachment${entry.media.length == 1 ? '' : 's'}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   ...entry.media.map(
                     (media) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: AppTheme.surfaceBackground,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(14),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -539,9 +916,7 @@ class _TimelineCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(14),
                             child: Image.network(
                               apiClient.resolveMediaUrl(media.downloadPath),
-                              headers: {
-                                'Authorization': 'Bearer $accessToken',
-                              },
+                              headers: {'Authorization': 'Bearer $accessToken'},
                               fit: BoxFit.cover,
                               height: 160,
                               width: double.infinity,
@@ -565,9 +940,8 @@ class _TimelineCard extends StatelessWidget {
                           const SizedBox(height: 8),
                           Text(
                             media.originalFileName,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                         ],
                       ),
@@ -592,10 +966,7 @@ class _TimelineCard extends StatelessWidget {
 }
 
 class _AddEntrySheet extends StatefulWidget {
-  const _AddEntrySheet({
-    this.initialType,
-    required this.onPickEvidence,
-  });
+  const _AddEntrySheet({this.initialType, required this.onPickEvidence});
 
   final ResidentEntryType? initialType;
   final Future<TimelineEvidenceFile?> Function() onPickEvidence;
@@ -676,7 +1047,7 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Add Structured Entry',
+              'Add note',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
@@ -695,14 +1066,14 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
                 if (value == null) return;
                 setState(() => _selectedType = value);
               },
-              decoration: const InputDecoration(labelText: 'Entry type'),
+              decoration: const InputDecoration(labelText: 'Note type'),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _detailsController,
               maxLines: 5,
               decoration: const InputDecoration(
-                labelText: 'Details',
+                labelText: 'Note',
                 alignLabelWithHint: true,
               ),
             ),
@@ -716,9 +1087,7 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.add_a_photo_outlined),
-              label: Text(
-                _evidence == null ? 'Attach photo evidence' : 'Replace photo evidence',
-              ),
+              label: Text(_evidence == null ? 'Attach photo' : 'Replace photo'),
             ),
             if (_evidence != null) ...[
               const SizedBox(height: 12),
@@ -755,7 +1124,7 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
             FilledButton.icon(
               onPressed: _submit,
               icon: const Icon(Icons.save_outlined),
-              label: const Text('Save Entry'),
+              label: const Text('Save note'),
             ),
           ],
         ),

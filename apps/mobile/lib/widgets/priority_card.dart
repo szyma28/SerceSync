@@ -33,18 +33,18 @@ class PriorityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _accentColor.withAlpha(90), width: 1.4),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _accentColor.withAlpha(70), width: 1.2),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -52,15 +52,15 @@ class PriorityCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 42,
+                    height: 42,
                     decoration: BoxDecoration(
                       color: _accentColor.withAlpha(18),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(_icon, color: _accentColor),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -75,7 +75,7 @@ class PriorityCard extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: AppTheme.textSecondary,
-                                height: 1.45,
+                                height: 1.35,
                               ),
                         ),
                       ],
@@ -83,10 +83,10 @@ class PriorityCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               Wrap(
-                spacing: 10,
-                runSpacing: 10,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   _Pill(
                     icon: Icons.person_pin_circle_outlined,
@@ -122,10 +122,11 @@ class _Pill extends StatelessWidget {
         : accentColor!.withAlpha(18);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: foreground.withAlpha(18)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

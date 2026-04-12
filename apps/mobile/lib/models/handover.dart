@@ -1,5 +1,7 @@
 import 'user.dart';
 
+DateTime _parseApiDateTime(String value) => DateTime.parse(value).toLocal();
+
 class HandoverSnapshot {
   const HandoverSnapshot({
     required this.shift,
@@ -21,7 +23,7 @@ class HandoverSnapshot {
       acknowledged: json['acknowledged'] as bool,
       acknowledgedAt: json['acknowledgedAt'] == null
           ? null
-          : DateTime.parse(json['acknowledgedAt'] as String),
+          : _parseApiDateTime(json['acknowledgedAt'] as String),
     );
   }
 
@@ -47,8 +49,8 @@ class ShiftSummary {
     return ShiftSummary(
       id: json['id'] as String,
       name: json['name'] as String,
-      startsAt: DateTime.parse(json['startsAt'] as String),
-      endsAt: DateTime.parse(json['endsAt'] as String),
+      startsAt: _parseApiDateTime(json['startsAt'] as String),
+      endsAt: _parseApiDateTime(json['endsAt'] as String),
       status: json['status'] as String,
       floorNumber: json['floorNumber'] as int? ?? 1,
       unitLabel: json['unitLabel'] as String? ?? 'Willow Floor',
@@ -76,8 +78,8 @@ class HandoverSummary {
     return HandoverSummary(
       id: json['id'] as String,
       summary: json['summary'] as String,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: _parseApiDateTime(json['createdAt'] as String),
+      updatedAt: _parseApiDateTime(json['updatedAt'] as String),
     );
   }
 

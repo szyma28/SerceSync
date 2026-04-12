@@ -35,9 +35,12 @@ Each slice should:
 - include test evidence before it is treated as complete
 - produce a supporting feature note in `docs/` for dissertation traceability
 
-The first completed slice is documented in:
+Completed slices and supporting delivery notes are documented in:
 - `docs/requirements/handover-acknowledgement-vertical-slice.md`
 - `docs/requirements/task-accountability-backend-slice.md`
+- `docs/requirements/mobile-shift-workspace-vertical-slice.md`
+- `docs/requirements/manager-residents-media-live-shift-vertical-slice.md`
+- `docs/requirements/mobile-workspace-ia-pivot.md`
 
 ## Technology stack
 
@@ -115,7 +118,7 @@ Recommended baseline versions:
 
 ## Getting started
 
-This repository currently contains the project foundation only.
+This repository contains the current dissertation prototype together with the slice notes used to document delivery decisions and traceable progress.
 
 ### 1. Enter the project
 
@@ -165,14 +168,28 @@ pnpm run db:migrate
 
 This applies the Prisma migrations and initializes the backend schema.
 
-### 5. Seed the first feature slice
+### 5. Seed the current demo data
 
 ```bash
 pnpm run db:seed
 ```
 
-The seed currently creates a demo carer, an active shift, and a handover for the handover acknowledgement flow.
-It also creates demo tasks for the task accountability backend slice.
+The seed currently creates demo users, an active shift, a handover, live tasks, and resident records so the implemented mobile and web slices can be demonstrated locally.
+
+### 6. Reset the demo back to the standard baseline
+
+If you want the same known resident directory, handover, and live priority set again before a demo or review, run:
+
+```bash
+cd apps/api
+pnpm run db:reset-demo
+```
+
+This clears the local demo workflow data that changes during use and recreates the standard baseline, including:
+- the active carer shift
+- the current handover
+- the four live priority tasks used in the mobile workflow
+- the seeded resident directory used by both mobile and manager web
 
 
 ## Environment configuration
@@ -205,10 +222,14 @@ cd apps/mobile
 flutter run
 ```
 
-The mobile app now includes the first implemented workflow slice:
+The mobile app now includes multiple connected workflow slices:
 - login with seeded demo credentials
 - current handover display
 - handover acknowledgement
+- post-handover workspace navigation across Priorities, Residents, and My Shift
+- live priority completion from the resident detail screen
+- resident notes with optional photo evidence upload
+- shift assignments pulled from the API
 
 The API base URL defaults to `http://localhost:3000`.
 If you need to override it, pass a Dart define:
@@ -224,8 +245,10 @@ cd apps/web
 flutter run -d chrome
 ```
 
-This scaffold is reserved for the manager-facing web application.
-It currently displays a simple foundation placeholder screen rather than any real manager features.
+The web app now includes a first-pass manager workspace with:
+- manager login
+- resident directory visibility across floors
+- create and edit resident records
 
 ### API
 
@@ -234,17 +257,23 @@ cd apps/api
 pnpm run start:dev
 ```
 
-The API now supports the first workflow slice with:
+The API now supports the currently delivered slices with:
 - `POST /auth/login`
 - `GET /shifts/current`
+- `GET /shifts/my`
 - `GET /handovers/current`
 - `POST /handovers/current/acknowledge`
 - `GET /tasks/current`
 - `POST /tasks/:id/complete`
 - `POST /tasks/:id/defer`
 - `POST /tasks/:id/escalate`
-
-The task accountability endpoints are currently backend-only. They are ready for client integration, but the mobile and web apps do not yet expose them in the UI.
+- `GET /residents`
+- `GET /residents/:id`
+- `POST /residents/:id/timeline`
+- `GET /resident-media/:id`
+- `GET /manager/residents`
+- `POST /manager/residents`
+- `PATCH /manager/residents/:id`
 
 ### Prisma and database scripts
 
@@ -255,6 +284,7 @@ pnpm run prisma:validate
 pnpm run prisma:generate
 pnpm run db:migrate
 pnpm run db:seed
+pnpm run db:reset-demo
 pnpm run db:status
 ```
 
@@ -268,21 +298,26 @@ The current Prisma schema includes:
 - `Handover`
 - `HandoverAcknowledgement`
 - `Task`
+- `Resident`
+- `ResidentTimelineEntry`
+- `ResidentTimelineMedia`
 - `AuditEvent`
 
 This now supports:
 
 - the handover acknowledgement vertical slice
 - the task accountability backend slice
+- the mobile shift workspace slice
+- the manager residents, media, and live shift slice
 
-It does not yet include the later manager exception reporting workflow in the client applications.
+The next planned workflow step is the manager exceptions dashboard and evidence reporting layer.
 
 ## Current demo credentials
 
 After running `pnpm run db:seed`, use:
 
-- email: `carer@sercesync.local`
-- password: `Password123!`
+- carer: `carer@sercesync.local` / `Password123!`
+- manager: `manager@sercesync.local` / `Password123!`
 
 ## Continuous integration
 

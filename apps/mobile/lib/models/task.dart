@@ -1,3 +1,5 @@
+DateTime _parseApiDateTime(String value) => DateTime.parse(value).toLocal();
+
 class ShiftTask {
   const ShiftTask({
     required this.id,
@@ -18,7 +20,7 @@ class ShiftTask {
       description: json['description'] as String?,
       dueAt: json['dueAt'] == null
           ? null
-          : DateTime.parse(json['dueAt'] as String),
+          : _parseApiDateTime(json['dueAt'] as String),
       status: json['status'] as String,
       statusNote: json['statusNote'] as String?,
       residentId: json['residentId'] as String?,

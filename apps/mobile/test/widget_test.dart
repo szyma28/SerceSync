@@ -73,7 +73,7 @@ void main() {
     await tester.tap(find.text('My Shift').last);
     await tester.pumpAndSettle();
     expect(find.text('Current Shift'), findsOneWidget);
-    expect(find.text('Assigned Shifts'), findsOneWidget);
+    expect(find.text('Upcoming shifts'), findsOneWidget);
     expect(find.text('Willow Floor · Floor 1'), findsOneWidget);
     expect(find.text('Tomorrow Care Shift'), findsOneWidget);
     expect(find.text('Evening Relief Shift'), findsOneWidget);
@@ -96,15 +96,61 @@ void main() {
     );
 
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Skin integrity review completed.'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
 
     expect(find.text('Skin integrity review completed.'), findsOneWidget);
-    expect(find.text('1 evidence item attached'), findsOneWidget);
+    expect(find.text('1 attachment'), findsOneWidget);
     expect(find.text('skin-check.jpg'), findsOneWidget);
+    expect(find.text('Complete'), findsOneWidget);
+  });
+
+  testWidgets('resident detail completes an active priority in context', (
+    WidgetTester tester,
+  ) async {
+    final client = _FakeApiClient();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ResidentDetailScreen(
+          residentId: 'resident-1',
+          apiClient: client,
+          accessToken: 'token',
+          currentCarerName: 'Alex Carer',
+          highlightTaskId: 'task-1',
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Complete'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    await tester.enterText(
+      find.byType(TextField).first,
+      'Completed with resident comfortable after breakfast.',
+    );
+    final completeButton = find.widgetWithText(FilledButton, 'Complete');
+    await tester.ensureVisible(completeButton);
+    await tester.tap(completeButton);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Priority completed.'), findsOneWidget);
+    expect(find.text('Hydration round for Margaret Evans'), findsNothing);
   });
 }
 
 class _FakeApiClient extends SerceSyncApiClient {
   _FakeApiClient() : super(baseUrl: 'http://localhost:3000');
+
+  bool _residentTaskCompleted = false;
 
   @override
   Future<List<ShiftTask>> getCurrentTasks({required String accessToken}) async {
@@ -161,9 +207,7 @@ class _FakeApiClient extends SerceSyncApiClient {
         todaySummary: 'Assigned resident summary for room $roomNumber.',
         assignmentContext: 'Assigned to Willow Floor for this shift',
         contextLine: 'Room $roomNumber follow-up remains visible this shift',
-        alerts: [
-          roomNumber == 2 ? 'Overdue follow-up' : 'Due this shift',
-        ],
+        alerts: [roomNumber == 2 ? 'Overdue follow-up' : 'Due this shift'],
       );
     });
   }
@@ -184,7 +228,20 @@ class _FakeApiClient extends SerceSyncApiClient {
       assignmentContext: 'Assigned to Willow Floor for this shift',
       contextLine: 'Linked priority visible for this resident',
       alerts: const ['Due this shift'],
-      currentTasks: const [],
+      currentTasks: _residentTaskCompleted
+          ? const []
+          : [
+              ResidentTaskSummary(
+                id: 'task-1',
+                title: 'Hydration round for Margaret Evans',
+                description: 'Offer fluids and record intake after breakfast.',
+                status: 'PENDING',
+                dueAt: DateTime(2026, 4, 11, 9, 30),
+                residentId: residentId,
+                residentName: 'Margaret Evans',
+                room: 'Room 1',
+              ),
+            ],
       timeline: [
         ResidentTimelineEntry(
           id: 'timeline-1',
@@ -222,6 +279,26 @@ class _FakeApiClient extends SerceSyncApiClient {
       authorName: 'Alex Carer',
       timestamp: DateTime(2026, 4, 11, 9),
       media: const [],
+    );
+  }
+
+  @override
+  Future<ShiftTask> completeTask({
+    required String accessToken,
+    required String taskId,
+    String? note,
+  }) async {
+    _residentTaskCompleted = true;
+    return ShiftTask(
+      id: taskId,
+      title: 'Hydration round for Margaret Evans',
+      description: 'Offer fluids and record intake after breakfast.',
+      dueAt: DateTime(2026, 4, 11, 9, 30),
+      status: 'COMPLETED',
+      statusNote: note,
+      residentId: 'resident-1',
+      residentName: 'Margaret Evans',
+      room: 'Room 1',
     );
   }
 

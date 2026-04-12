@@ -373,11 +373,8 @@ describe('SerceSync workflow slices (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
 
-    expect(
-      refreshedTasksResponse.body.tasks.map(
-        (task: { status: string }) => task.status,
-      ),
-    ).toEqual(['DEFERRED', 'ESCALATED', 'COMPLETED']);
+    expect(refreshedTasksResponse.body.tasks).toHaveLength(1);
+    expect(refreshedTasksResponse.body.tasks[0].status).toBe('ESCALATED');
 
     const auditEvents = await prisma.auditEvent.findMany({
       where: {

@@ -368,9 +368,12 @@ async function main() {
     });
   }
 
-  console.log('Seed complete.');
+  console.log('Demo baseline reset complete.');
+  console.log('This command removes resident, shift, handover, task, and audit demo data and recreates the standard local baseline.');
   console.log('Demo login: carer@sercesync.local / Password123!');
+  console.log('Demo login: manager@sercesync.local / Password123!');
   console.log(`Seeded ${residents.length} fictional residents across 3 floors.`);
+  console.log('Restored 4 live priority tasks for the active Willow Floor shift.');
 }
 
 main()

@@ -89,7 +89,7 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
           onRefresh: _loadShiftOverview,
           color: AppTheme.primaryBlue,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
             children: [
               _SectionCard(
                 title: 'Current Shift',
@@ -127,16 +127,16 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
               _SectionCard(
-                title: 'Assigned Shifts',
+                title: 'Upcoming shifts',
                 child: _AssignmentsList(
                   isLoading: _isLoading,
                   assignments: assignments,
                   fallbackShift: widget.snapshot.shift,
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
               _SectionCard(
                 title: 'Settings',
                 child: Column(
@@ -144,16 +144,14 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.lock_outline_rounded),
-                      title: const Text('BYOD and privacy controls'),
+                      title: const Text('Privacy and device'),
                       subtitle: const Text(
-                        'Future place for device policy, notifications, and secure access settings.',
+                        'Notifications, privacy, and device access.',
                       ),
                       onTap: () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text(
-                              'Settings will grow here once device-policy controls are wired in.',
-                            ),
+                            content: Text('Settings are not available yet.'),
                           ),
                         );
                       },
@@ -166,7 +164,7 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                         color: AppTheme.errorRed,
                       ),
                       title: const Text('Log Out'),
-                      subtitle: const Text('Return to the sign-in screen.'),
+                      subtitle: const Text('Back to sign in.'),
                       onTap: widget.onLogout,
                     ),
                   ],
@@ -239,23 +237,24 @@ class _AssignmentsList extends StatelessWidget {
       children: visibleAssignments
           .map(
             (entry) => Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppTheme.surfaceBackground,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.borderLight),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       color: entry.status == 'ACTIVE'
                           ? AppTheme.primaryBlueLight
                           : const Color(0xFFE8EEF5),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       entry.status == 'ACTIVE'
@@ -264,7 +263,7 @@ class _AssignmentsList extends StatelessWidget {
                       color: AppTheme.primaryBlueDark,
                     ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -281,10 +280,11 @@ class _AssignmentsList extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           '${_time(entry.startsAt)} - ${_time(entry.endsAt)} · ${entry.status}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppTheme.textSecondary,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
                       ],
                     ),
@@ -328,17 +328,18 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.borderLight),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           child,
         ],
       ),

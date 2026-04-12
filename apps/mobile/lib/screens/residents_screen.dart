@@ -75,7 +75,9 @@ class ResidentsScreenState extends State<ResidentsScreen> {
   @override
   Widget build(BuildContext context) {
     final unitLabel = _residents.isNotEmpty ? _residents.first.unitLabel : null;
-    final floorNumber = _residents.isNotEmpty ? _residents.first.floorNumber : null;
+    final floorNumber = _residents.isNotEmpty
+        ? _residents.first.floorNumber
+        : null;
 
     return Container(
       decoration: AppTheme.atmosphericBackground,
@@ -100,22 +102,22 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                 )
               : _errorMessage != null && _residents.isEmpty
               ? _ResidentsMessageState(
-                  title: 'Couldn\'t load residents',
+                  title: 'Residents couldn\'t be loaded',
                   message: _errorMessage!,
                   actionLabel: 'Try Again',
                   onAction: _loadResidents,
                 )
               : _residents.isEmpty
               ? const _ResidentsMessageState(
-                  title: 'No residents on this floor right now',
+                  title: 'No residents assigned',
                   message:
-                      'Residents for the currently assigned floor will appear here once the shift context is active.',
+                      'Residents will appear here when the shift is active.',
                 )
               : RefreshIndicator(
                   onRefresh: _loadResidents,
                   color: AppTheme.primaryBlue,
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
                     children: [
                       _ResidentsScopeCard(
                         residentCount: _residents.length,
@@ -152,19 +154,27 @@ class _ResidentsScopeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white.withAlpha(225),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryBlueDark.withAlpha(8),
+            blurRadius: 16,
+            offset: const Offset(0, 7),
+          ),
+        ],
       ),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: AppTheme.primaryBlueLight,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.apartment_rounded,
@@ -177,7 +187,7 @@ class _ResidentsScopeCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$residentCount residents loaded',
+                  '$residentCount ${residentCount == 1 ? 'resident' : 'residents'}',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 4),
@@ -206,29 +216,30 @@ class _ResidentListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.borderLight),
         boxShadow: AppTheme.premiumShadow,
       ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 child: Image.asset(
                   resident.photoAssetPath,
-                  width: 62,
-                  height: 62,
+                  width: 56,
+                  height: 56,
                   fit: BoxFit.cover,
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -258,15 +269,16 @@ class _ResidentListCard extends StatelessWidget {
                       ),
                     ),
                     if (resident.alerts.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
+                          horizontal: 9,
+                          vertical: 5,
                         ),
                         decoration: BoxDecoration(
                           color: AppTheme.surfaceBackground,
                           borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppTheme.borderLight),
                         ),
                         child: Text(
                           resident.alerts.first,

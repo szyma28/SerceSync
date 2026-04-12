@@ -150,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           1.15, // Dialed back scale slightly for better balance
                       alignment: Alignment.bottomCenter,
                       child: Image.asset(
-                        'assets/images/Nurse03.png',
+                        'assets/images/NurseThumbsUp_Logo.png',
                         fit: BoxFit.contain,
                         alignment: Alignment.bottomCenter,
                       ),
