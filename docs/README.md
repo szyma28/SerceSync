@@ -14,3 +14,6 @@ Current feature notes:
 - `requirements/task-accountability-backend-slice.md`
 - `requirements/mobile-workspace-ia-pivot.md`
 - `requirements/mobile-shift-workspace-vertical-slice.md`
+- `requirements/manager-residents-media-live-shift-vertical-slice.md`
+- `requirements/manager-dashboard-vertical-slice.md`
+- `requirements/care-signals-and-incident-response-future-slice.md`

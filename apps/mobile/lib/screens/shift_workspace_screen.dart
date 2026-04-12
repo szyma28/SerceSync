@@ -28,8 +28,6 @@ class ShiftWorkspaceScreen extends StatefulWidget {
 }
 
 class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
-  final GlobalKey<ResidentsScreenState> _residentsKey =
-      GlobalKey<ResidentsScreenState>();
   late final List<Widget> _pages;
   int _currentIndex = 0;
 
@@ -41,10 +39,9 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
         apiClient: widget.apiClient,
         accessToken: widget.accessToken,
         shiftName: widget.snapshot.shift.name,
-        onOpenResident: _openResidentFromPriority,
+        currentCarerName: widget.user.displayName,
       ),
       ResidentsScreen(
-        key: _residentsKey,
         apiClient: widget.apiClient,
         accessToken: widget.accessToken,
         currentCarerName: widget.user.displayName,
@@ -57,13 +54,6 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
         onLogout: _logout,
       ),
     ];
-  }
-
-  void _openResidentFromPriority(String residentId) {
-    setState(() => _currentIndex = 1);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _residentsKey.currentState?.openResidentById(residentId);
-    });
   }
 
   void _logout() {

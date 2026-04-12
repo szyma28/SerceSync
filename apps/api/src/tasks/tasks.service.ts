@@ -178,6 +178,9 @@ export class TasksService {
       where: {
         shiftId: shift.id,
         assignedUserId: user.userId,
+        status: {
+          notIn: ['COMPLETED', 'DEFERRED'],
+        },
       },
       include: {
         resident: true,

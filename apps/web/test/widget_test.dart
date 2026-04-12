@@ -6,29 +6,37 @@ void main() {
   testWidgets('renders the manager residents workspace', (
     WidgetTester tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     await tester.pumpWidget(
       SerceSyncWebApp(
         apiClient: _FakeManagerApiClient(),
       ),
     );
 
-    expect(find.text('Manager Sign In'), findsOneWidget);
+    expect(find.text('Manager workspace'), findsOneWidget);
 
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Email Address'),
+      find.widgetWithText(TextFormField, 'Email address'),
       'manager@sercesync.local',
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Password'),
       'Password123!',
     );
-    await tester.tap(find.text('Open Residents Workspace'));
+    await tester.tap(find.text('Open manager dashboard'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Residents Directory'), findsOneWidget);
+    expect(find.text('Unit Overview'), findsOneWidget);
+
+    await tester.tap(find.text('Residents'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Resident Directory'), findsOneWidget);
     expect(find.text('Margaret Evans'), findsOneWidget);
-    expect(find.text('Create Resident'), findsOneWidget);
-    expect(find.text('Save Resident'), findsOneWidget);
+    expect(find.text('New Resident'), findsOneWidget);
+    expect(find.text('Save Record'), findsOneWidget);
   });
 }
 
@@ -48,6 +56,54 @@ class _FakeManagerApiClient extends SerceSyncManagerApiClient {
         displayName: 'Morgan Manager',
         role: 'MANAGER',
       ),
+    );
+  }
+
+  @override
+  Future<ManagerDashboardSnapshot> getDashboard({
+    required String accessToken,
+  }) async {
+    return ManagerDashboardSnapshot(
+      activeShift: ManagerShiftSummary(
+        id: 'shift-1',
+        name: 'Morning Shift',
+        unitLabel: 'Willow Floor',
+        floorNumber: 1,
+        startsAt: DateTime(2026, 4, 12, 7),
+        endsAt: DateTime(2026, 4, 12, 14),
+      ),
+      metrics: const ManagerDashboardMetrics(
+        overdueTasks: 1,
+        escalatedItems: 1,
+        unreadHandovers: 0,
+        shiftCompletionPercent: 17,
+      ),
+      exceptionFeed: const [
+        ManagerExceptionFeedItem(
+          id: 'feed-1',
+          title: 'Wound Dressing Change',
+          residentName: 'Margaret Evans',
+          roomLabel: 'Room 1',
+          description: 'Dressing was loose, needed senior nurse assistance.',
+          badge: 'ESCALATED',
+          badgeTone: 'warning',
+          dueAt: null,
+        ),
+      ],
+      complianceSeries: [
+        ManagerCompliancePoint(
+          timestamp: DateTime(2026, 4, 12, 9),
+          value: 94,
+        ),
+        ManagerCompliancePoint(
+          timestamp: DateTime(2026, 4, 12, 11),
+          value: 86,
+        ),
+        ManagerCompliancePoint(
+          timestamp: DateTime(2026, 4, 12, 13),
+          value: 95,
+        ),
+      ],
     );
   }
 

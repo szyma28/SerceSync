@@ -40,6 +40,10 @@ const entryTypeLabels: Record<ResidentTimelineEntryType, string> = {
 export class ResidentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private clampNumber(value: number, minimum: number, maximum: number) {
+    return Math.min(Math.max(value, minimum), maximum);
+  }
+
   private getMediaStorageDirectory() {
     return join(tmpdir(), 'sercesync', 'resident-timeline-media');
   }
@@ -320,6 +324,57 @@ export class ResidentsService {
     };
   }
 
+  private getDashboardTaskStatus(task: {
+    status: TaskStatus;
+    dueAt: Date | null;
+  }) {
+    if (task.status === 'PENDING' && task.dueAt && task.dueAt.getTime() < Date.now()) {
+      return 'OVERDUE' satisfies TaskStatus;
+    }
+
+    return task.status;
+  }
+
+  private buildManagerComplianceSeries({
+    shiftStartsAt,
+    shiftEndsAt,
+    overdueTasks,
+    escalatedItems,
+    unreadHandovers,
+  }: {
+    shiftStartsAt: Date;
+    shiftEndsAt: Date;
+    overdueTasks: number;
+    escalatedItems: number;
+    unreadHandovers: number;
+  }) {
+    const shiftDurationMs = Math.max(
+      shiftEndsAt.getTime() - shiftStartsAt.getTime(),
+      60 * 60 * 1000,
+    );
+
+    const pointOffsets = [0.05, 0.3, 0.55, 0.82];
+    const values = [
+      this.clampNumber(97 - unreadHandovers * 2, 78, 99),
+      this.clampNumber(94 - escalatedItems * 3, 76, 98),
+      this.clampNumber(
+        88 - overdueTasks * 4 - escalatedItems * 2,
+        70,
+        96,
+      ),
+      this.clampNumber(
+        95 - overdueTasks * 2 - escalatedItems * 3 - unreadHandovers * 2,
+        72,
+        98,
+      ),
+    ];
+
+    return pointOffsets.map((offset, index) => ({
+      timestamp: new Date(shiftStartsAt.getTime() + shiftDurationMs * offset),
+      value: values[index],
+    }));
+  }
+
   private async persistResidentTimelineMedia(
     file: UploadedEvidenceFile,
     entryId: string,
@@ -408,13 +463,8 @@ export class ResidentsService {
       contextLine: this.buildContextLine(resident.tasks, resident.careSummary),
       alerts: this.buildAlerts(resident.tasks),
       currentTasks: resident.tasks.map((task) =>
-        this.mapResidentTask(
-          task,
-          resident.roomLabel,
-          resident.id,
-          resident.fullName,
-        ),
-      ),
+        this.mapResidentTask(task, resident.roomLabel, resident.id, resident.fullName),
+      ).filter((task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED'),
       timeline: resident.timelineEntries.map((entry) =>
         this.mapTimelineEntry(entry),
       ),
@@ -519,6 +569,171 @@ export class ResidentsService {
 
     return {
       residents: residents.map((resident) => this.mapManagerResident(resident)),
+    };
+  }
+
+  async getManagerDashboard() {
+    const activeShift = await this.prisma.shift.findFirst({
+      where: {
+        status: 'ACTIVE',
+      },
+      include: {
+        assignedUsers: {
+          select: {
+            id: true,
+          },
+        },
+        handover: {
+          include: {
+            acknowledgements: {
+              select: {
+                acknowledgedById: true,
+              },
+            },
+          },
+        },
+        tasks: {
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+              },
+            },
+          },
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+      orderBy: {
+        startsAt: 'desc',
+      },
+    });
+
+    if (!activeShift) {
+      throw new NotFoundException('No active shift was found for the manager dashboard.');
+    }
+
+    const assignedUserIds = new Set(activeShift.assignedUsers.map((user) => user.id));
+    const acknowledgedUserIds = new Set(
+      activeShift.handover?.acknowledgements.map((item) => item.acknowledgedById) ?? [],
+    );
+
+    const normalizedTasks = activeShift.tasks.map((task) => ({
+      ...task,
+      dashboardStatus: this.getDashboardTaskStatus(task),
+    }));
+
+    const overdueTasks = normalizedTasks.filter(
+      (task) => task.dashboardStatus === 'OVERDUE',
+    ).length;
+    const escalatedItems = normalizedTasks.filter(
+      (task) => task.dashboardStatus === 'ESCALATED',
+    ).length;
+    const unreadHandovers = Math.max(
+      assignedUserIds.size - acknowledgedUserIds.size,
+      0,
+    );
+
+    const shiftElapsedRatio =
+      (Date.now() - activeShift.startsAt.getTime()) /
+      Math.max(activeShift.endsAt.getTime() - activeShift.startsAt.getTime(), 1);
+    const shiftCompletionPercent = this.clampNumber(
+      Math.round(shiftElapsedRatio * 100),
+      0,
+      100,
+    );
+
+    const exceptionFeed = normalizedTasks
+      .map((task) => {
+        if (task.dashboardStatus === 'ESCALATED') {
+          return {
+            id: task.id,
+            title: task.title,
+            residentName: task.resident?.fullName ?? 'Unit task',
+            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+            description:
+              task.description ?? 'This item has been escalated for manager attention.',
+            badge: 'ESCALATED',
+            badgeTone: 'warning',
+            dueAt: task.dueAt,
+            priority: 0,
+          };
+        }
+
+        if (task.dashboardStatus === 'OVERDUE') {
+          return {
+            id: task.id,
+            title: task.title,
+            residentName: task.resident?.fullName ?? 'Unit task',
+            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+            description:
+              task.description ?? 'This task missed its expected care window.',
+            badge: 'MISSED',
+            badgeTone: 'critical',
+            dueAt: task.dueAt,
+            priority: 1,
+          };
+        }
+
+        if (
+          task.dashboardStatus === 'PENDING' &&
+          task.dueAt &&
+          task.dueAt.getTime() - Date.now() <= 90 * 60 * 1000
+        ) {
+          return {
+            id: task.id,
+            title: task.title,
+            residentName: task.resident?.fullName ?? 'Unit task',
+            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+            description:
+              task.description ?? 'This task is due soon within the active shift.',
+            badge: 'DUE SOON',
+            badgeTone: 'info',
+            dueAt: task.dueAt,
+            priority: 2,
+          };
+        }
+
+        return null;
+      })
+      .filter((task): task is NonNullable<typeof task> => task !== null)
+      .sort((left, right) => {
+        if (left.priority != right.priority) {
+          return left.priority - right.priority;
+        }
+
+        const leftTime = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const rightTime = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return leftTime - rightTime;
+      })
+      .slice(0, 3)
+      .map(({ priority: _, ...task }) => task);
+
+    const complianceSeries = this.buildManagerComplianceSeries({
+      shiftStartsAt: activeShift.startsAt,
+      shiftEndsAt: activeShift.endsAt,
+      overdueTasks,
+      escalatedItems,
+      unreadHandovers,
+    });
+
+    return {
+      activeShift: {
+        id: activeShift.id,
+        name: activeShift.name,
+        unitLabel: activeShift.unitLabel,
+        floorNumber: activeShift.floorNumber,
+        startsAt: activeShift.startsAt,
+        endsAt: activeShift.endsAt,
+      },
+      metrics: {
+        overdueTasks,
+        escalatedItems,
+        unreadHandovers,
+        shiftCompletionPercent,
+      },
+      exceptionFeed,
+      complianceSeries,
     };
   }
 

@@ -1,5 +1,7 @@
 import 'task.dart';
 
+DateTime _parseApiDateTime(String value) => DateTime.parse(value).toLocal();
+
 enum PriorityBand { urgentNow, dueWithinHour, reminders }
 
 enum ResidentEntryType {
@@ -253,11 +255,12 @@ class ResidentTimelineEntry {
       title: json['title'] as String,
       details: json['details'] as String,
       authorName: json['authorName'] as String,
-      timestamp: DateTime.parse(json['timestamp'] as String),
+      timestamp: _parseApiDateTime(json['timestamp'] as String),
       media: (json['media'] as List<dynamic>? ?? const [])
           .map(
-            (entry) =>
-                ResidentTimelineMediaItem.fromJson(entry as Map<String, dynamic>),
+            (entry) => ResidentTimelineMediaItem.fromJson(
+              entry as Map<String, dynamic>,
+            ),
           )
           .toList(),
     );
@@ -289,7 +292,7 @@ class ResidentTimelineMediaItem {
       mediaType: json['mediaType'] as String,
       byteSize: json['byteSize'] as int,
       downloadPath: json['downloadPath'] as String,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: _parseApiDateTime(json['createdAt'] as String),
     );
   }
 
@@ -333,7 +336,7 @@ class ResidentTaskSummary {
       status: json['status'] as String,
       dueAt: json['dueAt'] == null
           ? null
-          : DateTime.parse(json['dueAt'] as String),
+          : _parseApiDateTime(json['dueAt'] as String),
       residentId: json['residentId'] as String?,
       residentName: json['residentName'] as String?,
       room: json['room'] as String?,
@@ -444,15 +447,15 @@ class ShiftAssignment {
     return ShiftAssignment(
       id: json['id'] as String,
       name: json['name'] as String,
-      startsAt: DateTime.parse(json['startsAt'] as String),
-      endsAt: DateTime.parse(json['endsAt'] as String),
+      startsAt: _parseApiDateTime(json['startsAt'] as String),
+      endsAt: _parseApiDateTime(json['endsAt'] as String),
       status: json['status'] as String,
       floorNumber: json['floorNumber'] as int,
       unitLabel: json['unitLabel'] as String,
       handoverAcknowledged: json['handoverAcknowledged'] as bool? ?? false,
       handoverAcknowledgedAt: json['handoverAcknowledgedAt'] == null
           ? null
-          : DateTime.parse(json['handoverAcknowledgedAt'] as String),
+          : _parseApiDateTime(json['handoverAcknowledgedAt'] as String),
     );
   }
 
@@ -468,10 +471,7 @@ class ShiftAssignment {
 }
 
 class ShiftOverview {
-  const ShiftOverview({
-    required this.currentShift,
-    required this.assignments,
-  });
+  const ShiftOverview({required this.currentShift, required this.assignments});
 
   factory ShiftOverview.fromJson(Map<String, dynamic> json) {
     return ShiftOverview(

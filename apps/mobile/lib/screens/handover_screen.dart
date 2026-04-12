@@ -96,7 +96,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: const Text('Shift Handover'),
+          title: const Text('Handover'),
           actions: [
             IconButton(
               icon: const Icon(Icons.refresh),
@@ -161,7 +161,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'You\'re all set!',
+                'Handover complete',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: AppTheme.primaryBlueDark,
                 ),
@@ -169,7 +169,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Your shift has started safely. Your live workspace is ready with priorities, residents, and shift context.',
+                'Your workspace is ready.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   fontSize: 16,
                   color: AppTheme.textSecondary,
@@ -191,7 +191,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                 child: FilledButton.icon(
                   onPressed: _goToWorkspace,
                   icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Open Priorities'),
+                  label: const Text('Open workspace'),
                 ),
               ),
             ],
@@ -238,7 +238,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Please review your shift dossier.',
+                'Review the handover before you start.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: AppTheme.textSecondary,
                   fontSize: 18,
@@ -319,7 +319,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                'IMPORTANT NOTES',
+                                'SHIFT NOTES',
                                 style: Theme.of(context).textTheme.labelLarge
                                     ?.copyWith(
                                       color: AppTheme.textSecondary,
@@ -403,7 +403,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                         strokeWidth: 2.5,
                       ),
                     )
-                  : const Text('Acknowledge & Start Shift'),
+                  : const Text('Acknowledge and start'),
             ),
           ),
         ),
