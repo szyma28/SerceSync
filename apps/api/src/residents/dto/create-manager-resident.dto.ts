@@ -1,5 +1,7 @@
+import { ResidentPriorityLevel } from '@prisma/client';
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -39,6 +41,10 @@ export class CreateManagerResidentDto {
   @IsNotEmpty()
   @MaxLength(800)
   careSummary!: string;
+
+  @IsOptional()
+  @IsEnum(ResidentPriorityLevel)
+  baselinePriority?: ResidentPriorityLevel;
 
   @IsOptional()
   @IsBoolean()

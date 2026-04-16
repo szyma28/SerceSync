@@ -37,6 +37,38 @@ enum ResidentTimelineEntryType {
   ESCALATION
 }
 
+enum ResidentPriorityLevel {
+  GREEN
+  AMBER
+  RED
+}
+
+enum IncidentSeverity {
+  AMBER
+  RED
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum IncidentCategory {
+  FALL
+  MEDICATION
+  BEHAVIOUR
+  INJURY
+  OTHER
+}
+
+enum PersonalCareSubtype {
+  SHOWER
+  CONTINENCE
+  FOOT_CARE
+  SKIN_CARE
+}
+
 enum AuditEventKind {
   HANDOVER_ACKNOWLEDGED
   TASK_COMPLETED
@@ -44,6 +76,10 @@ enum AuditEventKind {
   TASK_ESCALATED
   RESIDENT_TIMELINE_ENTRY_CREATED
   RESIDENT_TIMELINE_MEDIA_ATTACHED
+  INCIDENT_CREATED
+  INCIDENT_MEDIA_ATTACHED
+  INCIDENT_ACKNOWLEDGED
+  INCIDENT_RESOLVED
   SHIFT_STARTED
   SHIFT_ENDED
   USER_LOGIN
@@ -76,6 +112,10 @@ model User {
   handoverAcknowledgements HandoverAcknowledgement[]
   residentTimelineEntries  ResidentTimelineEntry[]
   uploadedTimelineMedia    ResidentTimelineMedia[]
+  createdIncidents         Incident[]                @relation("CreatedIncidents")
+  acknowledgedIncidents    Incident[]                @relation("AcknowledgedIncidents")
+  resolvedIncidents        Incident[]                @relation("ResolvedIncidents")
+  uploadedIncidentMedia    IncidentMedia[]
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
 
@@ -95,6 +135,7 @@ model Shift {
   tasks           Task[]
   assignedUsers   User[]                  @relation("AssignedShifts")
   timelineEntries ResidentTimelineEntry[]
+  incidents       Incident[]
   auditEvents     AuditEvent[]
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
@@ -166,8 +207,10 @@ model Resident {
   recognitionImageKey String
   careSummary         String
   isActive            Boolean                 @default(true)
+  baselinePriority    ResidentPriorityLevel   @default(GREEN)
   tasks               Task[]
   timelineEntries     ResidentTimelineEntry[]
+  incidents           Incident[]
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
 
@@ -177,18 +220,19 @@ model Resident {
 }
 
 model ResidentTimelineEntry {
-  id          String                    @id @default(uuid()) @db.Uuid
-  residentId  String                    @db.Uuid
-  resident    Resident                  @relation(fields: [residentId], references: [id], onDelete: Cascade)
-  type        ResidentTimelineEntryType
-  title       String
-  details     String
-  createdById String?                   @db.Uuid
-  createdBy   User?                     @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  shiftId     String?                   @db.Uuid
-  shift       Shift?                    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  media       ResidentTimelineMedia[]
-  createdAt   DateTime                  @default(now())
+  id                  String                    @id @default(uuid()) @db.Uuid
+  residentId          String                    @db.Uuid
+  resident            Resident                  @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  type                ResidentTimelineEntryType
+  personalCareSubtype PersonalCareSubtype?
+  title               String
+  details             String
+  createdById         String?                   @db.Uuid
+  createdBy           User?                     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  shiftId             String?                   @db.Uuid
+  shift               Shift?                    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  media               ResidentTimelineMedia[]
+  createdAt           DateTime                  @default(now())
 
   @@index([residentId, createdAt])
   @@index([createdById])
@@ -211,6 +255,55 @@ model ResidentTimelineMedia {
   @@index([entryId, createdAt])
   @@index([uploadedById])
   @@map("resident_timeline_media")
+}
+
+model Incident {
+  id               String           @id @default(uuid()) @db.Uuid
+  residentId       String           @db.Uuid
+  resident         Resident         @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  shiftId          String           @db.Uuid
+  shift            Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  createdById      String?          @db.Uuid
+  createdBy        User?            @relation("CreatedIncidents", fields: [createdById], references: [id], onDelete: SetNull)
+  severity         IncidentSeverity
+  status           IncidentStatus   @default(OPEN)
+  category         IncidentCategory
+  title            String
+  details          String
+  occurredAt       DateTime         @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedById String?          @db.Uuid
+  acknowledgedBy   User?            @relation("AcknowledgedIncidents", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  resolvedAt       DateTime?
+  resolvedById     String?          @db.Uuid
+  resolvedBy       User?            @relation("ResolvedIncidents", fields: [resolvedById], references: [id], onDelete: SetNull)
+  media            IncidentMedia[]
+  createdAt        DateTime         @default(now())
+
+  @@index([residentId, status])
+  @@index([shiftId, status])
+  @@index([severity, status, createdAt])
+  @@index([createdById])
+  @@index([acknowledgedById])
+  @@index([resolvedById])
+  @@map("incidents")
+}
+
+model IncidentMedia {
+  id               String   @id @default(uuid()) @db.Uuid
+  incidentId       String   @db.Uuid
+  incident         Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  originalFileName String
+  mediaType        String
+  byteSize         Int
+  storageKey       String
+  uploadedById     String?  @db.Uuid
+  uploadedBy       User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+
+  @@index([incidentId, createdAt])
+  @@index([uploadedById])
+  @@map("incident_media")
 }
 
 model AuditEvent {

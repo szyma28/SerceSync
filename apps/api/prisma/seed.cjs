@@ -2,6 +2,10 @@ const bcrypt = require('bcryptjs');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const {
   PrismaClient,
+  IncidentCategory,
+  IncidentSeverity,
+  PersonalCareSubtype,
+  ResidentPriorityLevel,
   ResidentTimelineEntryType,
 } = require('@prisma/client');
 
@@ -99,6 +103,7 @@ const timelineBlueprints = [
   },
   {
     type: ResidentTimelineEntryType.PERSONAL_CARE,
+    personalCareSubtype: PersonalCareSubtype.SHOWER,
     title: 'Personal care recorded',
     details:
       'Personal care was supported with dignity and fresh clothing prepared afterwards.',
@@ -201,7 +206,9 @@ async function main() {
 
   await prisma.auditEvent.deleteMany();
   await prisma.handoverAcknowledgement.deleteMany();
+  await prisma.incidentMedia.deleteMany();
   await prisma.residentTimelineMedia.deleteMany();
+  await prisma.incident.deleteMany();
   await prisma.residentTimelineEntry.deleteMany();
   await prisma.handover.deleteMany();
   await prisma.task.deleteMany();
@@ -227,6 +234,10 @@ async function main() {
           recognitionImageKey:
             recognitionImageKeys[(roomNumber - 1) % recognitionImageKeys.length],
           careSummary: residentSummary(roomNumber - 1),
+          baselinePriority:
+            floorConfig.floorNumber === 1 && fullName === 'Raj Patel'
+              ? ResidentPriorityLevel.AMBER
+              : ResidentPriorityLevel.GREEN,
           isActive: true,
         },
       });
@@ -352,6 +363,7 @@ async function main() {
       return {
         residentId: resident.id,
         type: blueprint.type,
+        personalCareSubtype: blueprint.personalCareSubtype ?? null,
         title: blueprint.title,
         details:
           entryIndex === 2
@@ -367,6 +379,35 @@ async function main() {
       data: timelineEntries,
     });
   }
+
+  await prisma.incident.createMany({
+    data: [
+      {
+        residentId: residentsByName.get('Edith Turner').id,
+        shiftId: activeShift.id,
+        createdById: user.id,
+        severity: IncidentSeverity.AMBER,
+        status: 'OPEN',
+        category: IncidentCategory.INJURY,
+        title: 'Small skin tear noted on lower arm',
+        details:
+          'Minor skin tear observed during repositioning. Area cleaned and dressed, with ongoing monitoring required.',
+        occurredAt: new Date(now.getTime() - 22 * 60 * 1000),
+      },
+      {
+        residentId: residentsByName.get('Thomas Green').id,
+        shiftId: activeShift.id,
+        createdById: user.id,
+        severity: IncidentSeverity.RED,
+        status: 'OPEN',
+        category: IncidentCategory.FALL,
+        title: 'Unwitnessed fall in bedroom',
+        details:
+          'Resident found on the floor beside the bed. Emergency checks completed and manager review is required immediately.',
+        occurredAt: new Date(now.getTime() - 8 * 60 * 1000),
+      },
+    ],
+  });
 
   console.log('Demo baseline reset complete.');
   console.log('This command removes resident, shift, handover, task, and audit demo data and recreates the standard local baseline.');

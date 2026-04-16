@@ -1,5 +1,7 @@
+import { ResidentPriorityLevel } from '@prisma/client';
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -40,6 +42,10 @@ export class UpdateManagerResidentDto {
   @IsString()
   @MaxLength(800)
   careSummary?: string;
+
+  @IsOptional()
+  @IsEnum(ResidentPriorityLevel)
+  baselinePriority?: ResidentPriorityLevel;
 
   @IsOptional()
   @IsBoolean()

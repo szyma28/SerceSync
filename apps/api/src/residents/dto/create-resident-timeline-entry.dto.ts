@@ -1,5 +1,6 @@
-import { ResidentTimelineEntryType } from '@prisma/client';
+import { PersonalCareSubtype, ResidentTimelineEntryType } from '@prisma/client';
 import {
+  ValidateIf,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -20,4 +21,12 @@ export class CreateResidentTimelineEntryDto {
   @IsNotEmpty()
   @MaxLength(2000)
   details!: string;
+
+  @ValidateIf(
+    (value: CreateResidentTimelineEntryDto) =>
+      value.personalCareSubtype != null,
+  )
+  @IsEnum(PersonalCareSubtype)
+  @IsOptional()
+  personalCareSubtype?: PersonalCareSubtype;
 }

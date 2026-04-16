@@ -9,7 +9,7 @@ Recommended subfolders:
 
 Feature and working-session write-ups should also live here so each implemented slice has a durable explanation record.
 
-Current feature notes:
+Feature notes:
 - `requirements/handover-acknowledgement-vertical-slice.md`
 - `requirements/task-accountability-backend-slice.md`
 - `requirements/mobile-workspace-ia-pivot.md`
@@ -17,3 +17,4 @@ Current feature notes:
 - `requirements/manager-residents-media-live-shift-vertical-slice.md`
 - `requirements/manager-dashboard-vertical-slice.md`
 - `requirements/care-signals-and-incident-response-future-slice.md`
+- `requirements/care-signals-and-incident-response-vertical-slice.md`

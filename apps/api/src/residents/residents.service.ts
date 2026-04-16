@@ -2,22 +2,53 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type {
-  ResidentTimelineEntryType,
+  AuditEventKind,
+  IncidentMedia,
   ResidentTimelineMedia,
-  TaskStatus,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { extname, join } from 'path';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
+import {
+  getAuditDetailString,
+  type AuditEventDetails,
+} from '../audit-event-details';
+import { ManagerDashboardStreamService } from '../manager-dashboard-stream/manager-dashboard-stream.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildResidentPriorityState } from './resident-priority';
 import { CreateManagerResidentDto } from './dto/create-manager-resident.dto';
+import { CreateResidentIncidentDto } from './dto/create-resident-incident.dto';
 import { CreateResidentTimelineEntryDto } from './dto/create-resident-timeline-entry.dto';
 import { UpdateManagerResidentDto } from './dto/update-manager-resident.dto';
+import {
+  activeIncidentStatuses,
+  buildEntryTitle,
+  incidentInclude,
+} from './residents.constants';
+import {
+  buildAlerts,
+  buildContextLine,
+  buildManagerComplianceSeries,
+  getDashboardTaskStatus,
+  mapIncident,
+  mapIncidentCreatedActivityFeedItem,
+  mapIncidentExceptionFeedItem,
+  mapIncidentTransitionActivityFeedItem,
+  mapManagerResident,
+  mapResidentListItem,
+  mapResidentTask,
+  mapTaskActivityFeedItem,
+  mapTaskExceptionFeedItem,
+  mapTimelineActivityFeedItem,
+  mapTimelineEntry,
+} from './residents.presentation';
 
 type UploadedEvidenceFile = {
   buffer: Buffer;
@@ -26,19 +57,61 @@ type UploadedEvidenceFile = {
   size: number;
 };
 
-const entryTypeLabels: Record<ResidentTimelineEntryType, string> = {
-  CARE_GIVEN: 'Care Given',
-  OBSERVATION: 'Observation',
-  PERSONAL_CARE: 'Personal Care',
-  NUTRITION_HYDRATION: 'Nutrition / Hydration',
-  MOBILITY_REPOSITIONING: 'Mobility / Repositioning',
-  MEDICATION_NOTE: 'Medication Note',
-  ESCALATION: 'Escalation',
+function stripRank<T extends { rank: number }>(item: T): Omit<T, 'rank'> {
+  const { rank, ...rest } = item;
+  void rank;
+  return rest;
+}
+
+type TaskActivityBadgeConfig = {
+  badge: 'COMPLETED' | 'DEFERRED' | 'ESCALATED';
+  tone: 'success' | 'warning';
 };
+
+const taskActivityBadgeByKind: Record<
+  Extract<
+    AuditEventKind,
+    'TASK_COMPLETED' | 'TASK_DEFERRED' | 'TASK_ESCALATED'
+  >,
+  TaskActivityBadgeConfig
+> = {
+  TASK_COMPLETED: {
+    badge: 'COMPLETED',
+    tone: 'success',
+  },
+  TASK_DEFERRED: {
+    badge: 'DEFERRED',
+    tone: 'warning',
+  },
+  TASK_ESCALATED: {
+    badge: 'ESCALATED',
+    tone: 'warning',
+  },
+};
+
+function getTaskActivityBadgeConfig(
+  kind: AuditEventKind,
+): TaskActivityBadgeConfig | null {
+  switch (kind) {
+    case 'TASK_COMPLETED':
+      return taskActivityBadgeByKind.TASK_COMPLETED;
+    case 'TASK_DEFERRED':
+      return taskActivityBadgeByKind.TASK_DEFERRED;
+    case 'TASK_ESCALATED':
+      return taskActivityBadgeByKind.TASK_ESCALATED;
+    default:
+      return null;
+  }
+}
 
 @Injectable()
 export class ResidentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ResidentsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly managerDashboardStream: ManagerDashboardStreamService,
+  ) {}
 
   private clampNumber(value: number, minimum: number, maximum: number) {
     return Math.min(Math.max(value, minimum), maximum);
@@ -48,31 +121,161 @@ export class ResidentsService {
     return join(tmpdir(), 'sercesync', 'resident-timeline-media');
   }
 
+  private getIncidentMediaStorageDirectory() {
+    return join(tmpdir(), 'sercesync', 'incident-media');
+  }
+
   private async ensureMediaStorageDirectory() {
     const mediaDirectory = this.getMediaStorageDirectory();
     await mkdir(mediaDirectory, { recursive: true });
     return mediaDirectory;
   }
 
+  private async ensureIncidentMediaStorageDirectory() {
+    const mediaDirectory = this.getIncidentMediaStorageDirectory();
+    await mkdir(mediaDirectory, { recursive: true });
+    return mediaDirectory;
+  }
+
+  private logCleanupWarning(message: string, error: unknown) {
+    const details = error instanceof Error ? error.message : String(error);
+    this.logger.warn(`${message} (${details})`);
+  }
+
+  private async cleanupResidentTimelineMediaRollback(
+    mediaRecord: ResidentTimelineMedia,
+  ) {
+    const storagePath = join(
+      this.getMediaStorageDirectory(),
+      mediaRecord.storageKey,
+    );
+
+    try {
+      await this.prisma.residentTimelineMedia.delete({
+        where: {
+          id: mediaRecord.id,
+        },
+      });
+    } catch (error) {
+      this.logCleanupWarning(
+        `Failed to remove resident timeline media record ${mediaRecord.id} during rollback`,
+        error,
+      );
+    }
+
+    try {
+      await unlink(storagePath);
+    } catch (error) {
+      this.logCleanupWarning(
+        `Failed to remove resident timeline media file ${storagePath} during rollback`,
+        error,
+      );
+    }
+  }
+
+  private async cleanupIncidentMediaRollback(mediaRecord: IncidentMedia) {
+    const storagePath = join(
+      this.getIncidentMediaStorageDirectory(),
+      mediaRecord.storageKey,
+    );
+
+    try {
+      await this.prisma.incidentMedia.delete({
+        where: {
+          id: mediaRecord.id,
+        },
+      });
+    } catch (error) {
+      this.logCleanupWarning(
+        `Failed to remove incident media record ${mediaRecord.id} during rollback`,
+        error,
+      );
+    }
+
+    try {
+      await unlink(storagePath);
+    } catch (error) {
+      this.logCleanupWarning(
+        `Failed to remove incident media file ${storagePath} during rollback`,
+        error,
+      );
+    }
+  }
+
   private roomLabel(roomNumber: number) {
     return `Room ${roomNumber}`;
   }
 
-  private normalizeResidentInput(
-    input: CreateManagerResidentDto | UpdateManagerResidentDto,
+  private requireTrimmedText(value: string, fieldName: string) {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+      throw new BadRequestException(`${fieldName} is required.`);
+    }
+
+    return trimmedValue;
+  }
+
+  private normalizeOptionalTrimmedText(
+    value: string | null | undefined,
+    fieldName: string,
   ) {
+    if (value == null) {
+      return undefined;
+    }
+
+    return this.requireTrimmedText(value, fieldName);
+  }
+
+  private normalizeCreateResidentInput(input: CreateManagerResidentDto) {
+    return {
+      fullName: this.requireTrimmedText(input.fullName, 'fullName'),
+      roomNumber: input.roomNumber,
+      roomLabel: this.roomLabel(input.roomNumber),
+      floorNumber: input.floorNumber,
+      unitLabel: this.requireTrimmedText(input.unitLabel, 'unitLabel'),
+      recognitionImageKey: this.requireTrimmedText(
+        input.recognitionImageKey,
+        'recognitionImageKey',
+      ),
+      careSummary: this.requireTrimmedText(input.careSummary, 'careSummary'),
+      baselinePriority: input.baselinePriority,
+      isActive: input.isActive ?? true,
+    };
+  }
+
+  private normalizeUpdateResidentInput(input: UpdateManagerResidentDto) {
     return {
       ...('fullName' in input && input.fullName != null
-        ? { fullName: input.fullName.trim() }
+        ? {
+            fullName: this.normalizeOptionalTrimmedText(
+              input.fullName,
+              'fullName',
+            ),
+          }
         : {}),
       ...('unitLabel' in input && input.unitLabel != null
-        ? { unitLabel: input.unitLabel.trim() }
+        ? {
+            unitLabel: this.normalizeOptionalTrimmedText(
+              input.unitLabel,
+              'unitLabel',
+            ),
+          }
         : {}),
       ...('recognitionImageKey' in input && input.recognitionImageKey != null
-        ? { recognitionImageKey: input.recognitionImageKey.trim() }
+        ? {
+            recognitionImageKey: this.normalizeOptionalTrimmedText(
+              input.recognitionImageKey,
+              'recognitionImageKey',
+            ),
+          }
         : {}),
       ...('careSummary' in input && input.careSummary != null
-        ? { careSummary: input.careSummary.trim() }
+        ? {
+            careSummary: this.normalizeOptionalTrimmedText(
+              input.careSummary,
+              'careSummary',
+            ),
+          }
         : {}),
       ...('roomNumber' in input && input.roomNumber != null
         ? {
@@ -86,24 +289,386 @@ export class ResidentsService {
       ...('isActive' in input && input.isActive != null
         ? { isActive: input.isActive }
         : {}),
+      ...('baselinePriority' in input && input.baselinePriority != null
+        ? { baselinePriority: input.baselinePriority }
+        : {}),
     };
   }
 
-  private buildEntryTitle(
-    type: ResidentTimelineEntryType,
-    title: string | undefined,
-  ) {
-    const trimmed = title?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : entryTypeLabels[type];
+  private toManagerShiftSummary(shift: {
+    id: string;
+    name: string;
+    unitLabel: string;
+    floorNumber: number;
+    startsAt: Date;
+    endsAt: Date;
+  }) {
+    return {
+      id: shift.id,
+      name: shift.name,
+      unitLabel: shift.unitLabel,
+      floorNumber: shift.floorNumber,
+      startsAt: shift.startsAt,
+      endsAt: shift.endsAt,
+    };
   }
 
-  private isUniqueConstraintError(error: unknown) {
+  private async findActiveManagerShiftById(shiftId: string) {
+    const shift = await this.prisma.shift.findFirst({
+      where: {
+        id: shiftId,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        name: true,
+        unitLabel: true,
+        floorNumber: true,
+        startsAt: true,
+        endsAt: true,
+      },
+    });
+
+    if (!shift) {
+      throw new NotFoundException(
+        'Active shift was not found for the manager dashboard.',
+      );
+    }
+
+    return shift;
+  }
+
+  private async findActiveDashboardShiftById(shiftId: string) {
+    const shift = await this.prisma.shift.findFirst({
+      where: {
+        id: shiftId,
+        status: 'ACTIVE',
+      },
+      include: {
+        assignedUsers: {
+          select: {
+            id: true,
+          },
+        },
+        handover: {
+          include: {
+            acknowledgements: {
+              select: {
+                acknowledgedById: true,
+              },
+            },
+          },
+        },
+        tasks: {
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+              },
+            },
+          },
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+
+    if (!shift) {
+      throw new NotFoundException(
+        'Active shift was not found for the manager dashboard.',
+      );
+    }
+
+    return shift;
+  }
+
+  async ensureManagerDashboardShiftAccess(shiftId: string) {
+    await this.findActiveDashboardShiftById(shiftId);
+  }
+
+  private incidentMatchesShiftScope(
+    incident: {
+      resident: {
+        floorNumber: number;
+        unitLabel: string;
+        isActive: boolean;
+      };
+    },
+    shift: {
+      floorNumber: number;
+      unitLabel: string;
+    },
+  ) {
     return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
+      incident.resident.isActive &&
+      incident.resident.floorNumber === shift.floorNumber &&
+      incident.resident.unitLabel === shift.unitLabel
     );
+  }
+
+  private validateTimelineEntryPayload(
+    createResidentTimelineEntryDto: CreateResidentTimelineEntryDto,
+  ) {
+    const hasPersonalCareSubtype =
+      createResidentTimelineEntryDto.personalCareSubtype != null;
+
+    if (
+      createResidentTimelineEntryDto.type === 'PERSONAL_CARE' &&
+      !hasPersonalCareSubtype
+    ) {
+      throw new BadRequestException(
+        'personalCareSubtype is required when type is PERSONAL_CARE.',
+      );
+    }
+
+    if (
+      createResidentTimelineEntryDto.type !== 'PERSONAL_CARE' &&
+      hasPersonalCareSubtype
+    ) {
+      throw new BadRequestException(
+        'personalCareSubtype is only allowed when type is PERSONAL_CARE.',
+      );
+    }
+  }
+
+  private async getManagerActivityFeed(activeShift: {
+    id: string;
+    unitLabel: string;
+  }) {
+    const [timelineEntries, taskEvents, createdIncidents, incidentEvents] =
+      await Promise.all([
+        this.prisma.residentTimelineEntry.findMany({
+          where: {
+            shiftId: activeShift.id,
+          },
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+              },
+            },
+            createdBy: {
+              select: {
+                displayName: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 12,
+        }),
+        this.prisma.auditEvent.findMany({
+          where: {
+            shiftId: activeShift.id,
+            kind: {
+              in: ['TASK_COMPLETED', 'TASK_DEFERRED', 'TASK_ESCALATED'],
+            },
+          },
+          include: {
+            user: {
+              select: {
+                displayName: true,
+              },
+            },
+            task: {
+              select: {
+                id: true,
+                title: true,
+                statusNote: true,
+                resident: {
+                  select: {
+                    fullName: true,
+                    roomLabel: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 12,
+        }),
+        this.prisma.incident.findMany({
+          where: {
+            shiftId: activeShift.id,
+          },
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+              },
+            },
+            createdBy: {
+              select: {
+                displayName: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 12,
+        }),
+        this.prisma.auditEvent.findMany({
+          where: {
+            shiftId: activeShift.id,
+            kind: {
+              in: ['INCIDENT_ACKNOWLEDGED', 'INCIDENT_RESOLVED'],
+            },
+          },
+          include: {
+            user: {
+              select: {
+                displayName: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 12,
+        }),
+      ]);
+
+    const incidentIds = incidentEvents
+      .map((event) => getAuditDetailString(event.details, 'incidentId'))
+      .filter((incidentId): incidentId is string => incidentId != null);
+
+    const transitionIncidents = incidentIds.length
+      ? await this.prisma.incident.findMany({
+          where: {
+            id: {
+              in: incidentIds,
+            },
+          },
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+              },
+            },
+          },
+        })
+      : [];
+
+    const incidentsById = new Map(
+      transitionIncidents.map((incident) => [incident.id, incident]),
+    );
+
+    return [
+      ...timelineEntries.map((entry) => mapTimelineActivityFeedItem(entry)),
+      ...taskEvents
+        .map((event) => {
+          if (!event.task) {
+            return null;
+          }
+
+          const config = getTaskActivityBadgeConfig(event.kind);
+          if (!config) {
+            return null;
+          }
+
+          return mapTaskActivityFeedItem(
+            {
+              id: event.task.id,
+              title: event.task.title,
+              statusNote: event.task.statusNote,
+              resident: event.task.resident,
+              updatedAt: event.createdAt,
+              updatedBy: event.user,
+            },
+            config.badge,
+            config.tone,
+            activeShift.unitLabel,
+          );
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
+      ...createdIncidents.map((incident) =>
+        mapIncidentCreatedActivityFeedItem({
+          id: incident.id,
+          title: incident.title,
+          details: incident.details,
+          severity: incident.severity,
+          occurredAt: incident.createdAt,
+          actorName: incident.createdBy?.displayName ?? null,
+          resident: incident.resident,
+        }),
+      ),
+      ...incidentEvents
+        .map((event) => {
+          const incidentId = getAuditDetailString(event.details, 'incidentId');
+          if (!incidentId) {
+            return null;
+          }
+
+          const incident = incidentsById.get(incidentId);
+          if (!incident) {
+            return null;
+          }
+
+          return mapIncidentTransitionActivityFeedItem({
+            eventId: event.id,
+            incident: {
+              id: incident.id,
+              title: incident.title,
+              details: incident.details,
+              severity: incident.severity,
+              occurredAt: incident.createdAt,
+              actorName: null,
+              resident: incident.resident,
+            },
+            actorName: event.user?.displayName ?? null,
+            occurredAt: event.createdAt,
+            action:
+              event.kind === 'INCIDENT_RESOLVED' ? 'RESOLVED' : 'ACKNOWLEDGED',
+          });
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
+    ]
+      .sort(
+        (left, right) => right.occurredAt.getTime() - left.occurredAt.getTime(),
+      )
+      .slice(0, 12);
+  }
+
+  private async getResidentPrioritySnapshot(residentId: string) {
+    const resident = await this.prisma.resident.findUnique({
+      where: {
+        id: residentId,
+      },
+      select: {
+        id: true,
+        baselinePriority: true,
+        incidents: {
+          where: {
+            status: {
+              in: activeIncidentStatuses,
+            },
+          },
+          select: {
+            severity: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!resident) {
+      throw new NotFoundException('Resident was not found.');
+    }
+
+    return {
+      id: resident.id,
+      ...buildResidentPriorityState({
+        baselinePriority: resident.baselinePriority,
+        incidents: resident.incidents,
+      }),
+    };
   }
 
   private async findCurrentShiftForUser(userId: string) {
@@ -146,6 +711,36 @@ export class ResidentsService {
           },
           orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
         },
+        incidents: {
+          where: {
+            status: {
+              in: activeIncidentStatuses,
+            },
+          },
+          include: {
+            createdBy: {
+              select: {
+                displayName: true,
+              },
+            },
+            acknowledgedBy: {
+              select: {
+                displayName: true,
+              },
+            },
+            resolvedBy: {
+              select: {
+                displayName: true,
+              },
+            },
+            media: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+          },
+          orderBy: [{ severity: 'desc' }, { occurredAt: 'desc' }],
+        },
         timelineEntries: {
           include: {
             createdBy: true,
@@ -172,216 +767,15 @@ export class ResidentsService {
     return { shift, resident };
   }
 
-  private mapTaskStatusToAlert(status: TaskStatus) {
-    switch (status) {
-      case 'OVERDUE':
-        return 'Overdue follow-up';
-      case 'ESCALATED':
-        return 'Escalated item';
-      case 'DEFERRED':
-        return 'Deferred review';
-      case 'COMPLETED':
-        return 'Completed today';
-      case 'PENDING':
-      default:
-        return 'Due this shift';
-    }
-  }
-
-  private formatDueState(dueAt: Date | null) {
-    if (!dueAt) {
-      return 'No timed action due right now';
-    }
-
-    const diffMinutes = Math.round((dueAt.getTime() - Date.now()) / 60000);
-    if (diffMinutes < 0) {
-      return `Overdue by ${Math.abs(diffMinutes)} min`;
-    }
-    if (diffMinutes === 0) {
-      return 'Due now';
-    }
-    if (diffMinutes < 60) {
-      return `Due in ${diffMinutes} min`;
-    }
-    return `Due in ${Math.floor(diffMinutes / 60)} hr`;
-  }
-
-  private buildContextLine(
-    tasks: Array<{
-      title: string;
-      status: TaskStatus;
-      dueAt: Date | null;
-    }>,
-    careSummary: string,
-  ) {
-    const openTask = tasks.find(
-      (task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED',
-    );
-
-    if (!openTask) {
-      return careSummary;
-    }
-
-    return `${openTask.title} · ${this.formatDueState(openTask.dueAt)}`;
-  }
-
-  private buildAlerts(
-    tasks: Array<{
-      title: string;
-      status: TaskStatus;
-      dueAt: Date | null;
-    }>,
-  ) {
-    const alerts = tasks
-      .slice(0, 2)
-      .map((task) => this.mapTaskStatusToAlert(task.status));
-
-    return [...new Set(alerts)];
-  }
-
-  private mapTimelineMedia(media: ResidentTimelineMedia) {
-    return {
-      id: media.id,
-      originalFileName: media.originalFileName,
-      mediaType: media.mediaType,
-      byteSize: media.byteSize,
-      downloadPath: `/resident-media/${media.id}`,
-      createdAt: media.createdAt,
-    };
-  }
-
-  private mapTimelineEntry(entry: {
-    id: string;
-    type: ResidentTimelineEntryType;
-    title: string;
-    details: string;
-    createdAt: Date;
-    createdBy: {
-      displayName: string;
-    } | null;
-    media?: ResidentTimelineMedia[];
-  }) {
-    return {
-      id: entry.id,
-      type: entry.type,
-      title: entry.title,
-      details: entry.details,
-      authorName: entry.createdBy?.displayName ?? 'System note',
-      timestamp: entry.createdAt,
-      media: (entry.media ?? []).map((item) => this.mapTimelineMedia(item)),
-    };
-  }
-
-  private mapResidentTask(
-    task: {
-      id: string;
-      title: string;
-      description: string | null;
-      status: TaskStatus;
-      dueAt: Date | null;
-    },
-    roomLabel: string,
-    residentId: string,
-    residentName: string,
-  ) {
-    return {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      status: task.status,
-      dueAt: task.dueAt,
-      residentId,
-      residentName,
-      room: roomLabel,
-    };
-  }
-
-  private mapManagerResident(resident: {
-    id: string;
-    fullName: string;
-    roomNumber: number;
-    roomLabel: string;
-    floorNumber: number;
-    unitLabel: string;
-    recognitionImageKey: string;
-    careSummary: string;
-    isActive: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-  }) {
-    return {
-      id: resident.id,
-      fullName: resident.fullName,
-      roomNumber: resident.roomNumber,
-      roomLabel: resident.roomLabel,
-      floorNumber: resident.floorNumber,
-      unitLabel: resident.unitLabel,
-      recognitionImageKey: resident.recognitionImageKey,
-      careSummary: resident.careSummary,
-      isActive: resident.isActive,
-      createdAt: resident.createdAt,
-      updatedAt: resident.updatedAt,
-    };
-  }
-
-  private getDashboardTaskStatus(task: {
-    status: TaskStatus;
-    dueAt: Date | null;
-  }) {
-    if (task.status === 'PENDING' && task.dueAt && task.dueAt.getTime() < Date.now()) {
-      return 'OVERDUE' satisfies TaskStatus;
-    }
-
-    return task.status;
-  }
-
-  private buildManagerComplianceSeries({
-    shiftStartsAt,
-    shiftEndsAt,
-    overdueTasks,
-    escalatedItems,
-    unreadHandovers,
-  }: {
-    shiftStartsAt: Date;
-    shiftEndsAt: Date;
-    overdueTasks: number;
-    escalatedItems: number;
-    unreadHandovers: number;
-  }) {
-    const shiftDurationMs = Math.max(
-      shiftEndsAt.getTime() - shiftStartsAt.getTime(),
-      60 * 60 * 1000,
-    );
-
-    const pointOffsets = [0.05, 0.3, 0.55, 0.82];
-    const values = [
-      this.clampNumber(97 - unreadHandovers * 2, 78, 99),
-      this.clampNumber(94 - escalatedItems * 3, 76, 98),
-      this.clampNumber(
-        88 - overdueTasks * 4 - escalatedItems * 2,
-        70,
-        96,
-      ),
-      this.clampNumber(
-        95 - overdueTasks * 2 - escalatedItems * 3 - unreadHandovers * 2,
-        72,
-        98,
-      ),
-    ];
-
-    return pointOffsets.map((offset, index) => ({
-      timestamp: new Date(shiftStartsAt.getTime() + shiftDurationMs * offset),
-      value: values[index],
-    }));
-  }
-
   private async persistResidentTimelineMedia(
     file: UploadedEvidenceFile,
     entryId: string,
     userId: string,
   ) {
     if (!file.mimetype.startsWith('image/')) {
-      throw new BadRequestException('Resident evidence uploads must be images.');
+      throw new BadRequestException(
+        'Resident evidence uploads must be images.',
+      );
     }
 
     const mediaDirectory = await this.ensureMediaStorageDirectory();
@@ -394,6 +788,36 @@ export class ResidentsService {
     return this.prisma.residentTimelineMedia.create({
       data: {
         entryId,
+        originalFileName: file.originalname,
+        mediaType: file.mimetype,
+        byteSize: file.size,
+        storageKey,
+        uploadedById: userId,
+      },
+    });
+  }
+
+  private async persistIncidentMedia(
+    file: UploadedEvidenceFile,
+    incidentId: string,
+    userId: string,
+  ) {
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException(
+        'Incident evidence uploads must be images.',
+      );
+    }
+
+    const mediaDirectory = await this.ensureIncidentMediaStorageDirectory();
+    const fileExtension = extname(file.originalname) || '.bin';
+    const storageKey = `${randomUUID()}${fileExtension}`;
+    const storagePath = join(mediaDirectory, storageKey);
+
+    await writeFile(storagePath, file.buffer);
+
+    return this.prisma.incidentMedia.create({
+      data: {
+        incidentId,
         originalFileName: file.originalname,
         mediaType: file.mimetype,
         byteSize: file.size,
@@ -418,6 +842,17 @@ export class ResidentsService {
           },
           orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
         },
+        incidents: {
+          where: {
+            status: {
+              in: activeIncidentStatuses,
+            },
+          },
+          select: {
+            severity: true,
+            status: true,
+          },
+        },
       },
       orderBy: {
         roomNumber: 'asc',
@@ -427,21 +862,9 @@ export class ResidentsService {
     return {
       floorNumber: shift.floorNumber,
       unitLabel: shift.unitLabel,
-      residents: residents.map((resident) => ({
-        id: resident.id,
-        fullName: resident.fullName,
-        roomLabel: resident.roomLabel,
-        floorNumber: resident.floorNumber,
-        unitLabel: resident.unitLabel,
-        recognitionImageKey: resident.recognitionImageKey,
-        todaySummary: resident.careSummary,
-        assignmentContext: `Assigned to ${shift.unitLabel} for this shift`,
-        contextLine: this.buildContextLine(
-          resident.tasks,
-          resident.careSummary,
-        ),
-        alerts: this.buildAlerts(resident.tasks),
-      })),
+      residents: residents.map((resident) =>
+        mapResidentListItem(resident, shift),
+      ),
     };
   }
 
@@ -450,6 +873,11 @@ export class ResidentsService {
       residentId,
       user.userId,
     );
+
+    const priorityState = buildResidentPriorityState({
+      baselinePriority: resident.baselinePriority,
+      incidents: resident.incidents,
+    });
 
     return {
       id: resident.id,
@@ -460,13 +888,26 @@ export class ResidentsService {
       recognitionImageKey: resident.recognitionImageKey,
       todaySummary: resident.careSummary,
       assignmentContext: `Assigned to ${shift.unitLabel} for this shift`,
-      contextLine: this.buildContextLine(resident.tasks, resident.careSummary),
-      alerts: this.buildAlerts(resident.tasks),
-      currentTasks: resident.tasks.map((task) =>
-        this.mapResidentTask(task, resident.roomLabel, resident.id, resident.fullName),
-      ).filter((task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED'),
+      contextLine: buildContextLine(resident.tasks, resident.careSummary),
+      alerts: buildAlerts(resident.tasks),
+      ...priorityState,
+      activeIncidents: resident.incidents.map((incident) =>
+        mapIncident(incident),
+      ),
+      currentTasks: resident.tasks
+        .map((task) =>
+          mapResidentTask(
+            task,
+            resident.roomLabel,
+            resident.id,
+            resident.fullName,
+          ),
+        )
+        .filter(
+          (task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED',
+        ),
       timeline: resident.timelineEntries.map((entry) =>
-        this.mapTimelineEntry(entry),
+        mapTimelineEntry(entry),
       ),
     };
   }
@@ -477,6 +918,8 @@ export class ResidentsService {
     createResidentTimelineEntryDto: CreateResidentTimelineEntryDto,
     evidenceFile?: UploadedEvidenceFile,
   ) {
+    this.validateTimelineEntryPayload(createResidentTimelineEntryDto);
+
     const { shift, resident } = await this.findResidentInUserScope(
       residentId,
       user.userId,
@@ -490,11 +933,17 @@ export class ResidentsService {
           data: {
             residentId: resident.id,
             type: createResidentTimelineEntryDto.type,
-            title: this.buildEntryTitle(
+            personalCareSubtype:
+              createResidentTimelineEntryDto.personalCareSubtype ?? null,
+            title: buildEntryTitle(
               createResidentTimelineEntryDto.type,
               createResidentTimelineEntryDto.title,
+              createResidentTimelineEntryDto.personalCareSubtype,
             ),
-            details: createResidentTimelineEntryDto.details.trim(),
+            details: this.requireTrimmedText(
+              createResidentTimelineEntryDto.details,
+              'details',
+            ),
             createdById: user.userId,
             shiftId: shift.id,
           },
@@ -513,8 +962,9 @@ export class ResidentsService {
               residentName: resident.fullName,
               entryType: entry.type,
               entryTitle: entry.title,
+              personalCareSubtype: entry.personalCareSubtype,
               mediaAttached: Boolean(evidenceFile),
-            },
+            } satisfies AuditEventDetails,
           },
         });
 
@@ -539,88 +989,391 @@ export class ResidentsService {
               entryId: createdEntry.id,
               mediaType: mediaRecord.mediaType,
               originalFileName: mediaRecord.originalFileName,
-            },
+            } satisfies AuditEventDetails,
           },
         });
       }
 
+      this.managerDashboardStream.publishShiftUpdate(
+        shift.id,
+        'timeline-entry-created',
+      );
+
       return {
-        entry: this.mapTimelineEntry({
+        entry: mapTimelineEntry({
           ...createdEntry,
+          personalCareSubtype: createdEntry.personalCareSubtype,
           media: mediaRecord ? [mediaRecord] : [],
         }),
       };
     } catch (error) {
       if (mediaRecord) {
-        const storagePath = join(
-          this.getMediaStorageDirectory(),
-          mediaRecord.storageKey,
-        );
-        await unlink(storagePath).catch(() => undefined);
+        await this.cleanupResidentTimelineMediaRollback(mediaRecord);
       }
       throw error;
     }
   }
 
+  async createResidentIncident(
+    residentId: string,
+    user: AuthenticatedUser,
+    createResidentIncidentDto: CreateResidentIncidentDto,
+    evidenceFile?: UploadedEvidenceFile,
+  ) {
+    const { shift, resident } = await this.findResidentInUserScope(
+      residentId,
+      user.userId,
+    );
+
+    const occurredAt = createResidentIncidentDto.occurredAt
+      ? new Date(createResidentIncidentDto.occurredAt)
+      : new Date();
+
+    let mediaRecord: IncidentMedia | null = null;
+
+    try {
+      const incident = await this.prisma.$transaction(async (tx) => {
+        const createdIncident = await tx.incident.create({
+          data: {
+            residentId: resident.id,
+            shiftId: shift.id,
+            createdById: user.userId,
+            severity: createResidentIncidentDto.severity,
+            category: createResidentIncidentDto.category,
+            title: this.requireTrimmedText(
+              createResidentIncidentDto.title,
+              'title',
+            ),
+            details: this.requireTrimmedText(
+              createResidentIncidentDto.details,
+              'details',
+            ),
+            occurredAt,
+          },
+          include: incidentInclude,
+        });
+
+        await tx.auditEvent.create({
+          data: {
+            kind: 'INCIDENT_CREATED',
+            userId: user.userId,
+            shiftId: shift.id,
+            details: {
+              incidentId: createdIncident.id,
+              residentId: resident.id,
+              residentName: resident.fullName,
+              severity: createdIncident.severity,
+              status: createdIncident.status,
+              category: createdIncident.category,
+              title: createdIncident.title,
+              occurredAt: createdIncident.occurredAt,
+              mediaAttached: Boolean(evidenceFile),
+            } satisfies AuditEventDetails,
+          },
+        });
+
+        return createdIncident;
+      });
+
+      if (evidenceFile) {
+        mediaRecord = await this.persistIncidentMedia(
+          evidenceFile,
+          incident.id,
+          user.userId,
+        );
+
+        await this.prisma.auditEvent.create({
+          data: {
+            kind: 'INCIDENT_MEDIA_ATTACHED',
+            userId: user.userId,
+            shiftId: shift.id,
+            details: {
+              incidentId: incident.id,
+              residentId: resident.id,
+              residentName: resident.fullName,
+              mediaType: mediaRecord.mediaType,
+              originalFileName: mediaRecord.originalFileName,
+            } satisfies AuditEventDetails,
+          },
+        });
+      }
+
+      const residentPriority = await this.getResidentPrioritySnapshot(
+        resident.id,
+      );
+
+      this.managerDashboardStream.publishShiftUpdate(
+        shift.id,
+        'incident-created',
+      );
+
+      return {
+        incident: mapIncident({
+          ...incident,
+          media: mediaRecord ? [mediaRecord] : incident.media,
+        }),
+        resident: residentPriority,
+      };
+    } catch (error) {
+      if (mediaRecord) {
+        await this.cleanupIncidentMediaRollback(mediaRecord);
+      }
+      throw error;
+    }
+  }
+
+  async acknowledgeManagerIncident(
+    incidentId: string,
+    user: AuthenticatedUser,
+    shiftId: string,
+  ) {
+    const shift = await this.findActiveManagerShiftById(shiftId);
+    const existingIncident = await this.prisma.incident.findUnique({
+      where: {
+        id: incidentId,
+      },
+      include: incidentInclude,
+    });
+
+    if (!existingIncident) {
+      throw new NotFoundException('Incident was not found.');
+    }
+
+    if (!this.incidentMatchesShiftScope(existingIncident, shift)) {
+      throw new NotFoundException('Incident was not found.');
+    }
+
+    if (existingIncident.status !== 'OPEN') {
+      throw new BadRequestException('Only open incidents can be acknowledged.');
+    }
+
+    const acknowledgedAt = new Date();
+    const incident = await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.incident.updateMany({
+        where: {
+          id: incidentId,
+          status: 'OPEN',
+        },
+        data: {
+          status: 'ACKNOWLEDGED',
+          acknowledgedAt,
+          acknowledgedById: user.userId,
+        },
+      });
+
+      if (transition.count !== 1) {
+        throw new BadRequestException(
+          'Only open incidents can be acknowledged.',
+        );
+      }
+
+      const updatedIncident = await tx.incident.findUniqueOrThrow({
+        where: {
+          id: incidentId,
+        },
+        include: incidentInclude,
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          kind: 'INCIDENT_ACKNOWLEDGED',
+          userId: user.userId,
+          shiftId: updatedIncident.shiftId,
+          details: {
+            incidentId: updatedIncident.id,
+            residentId: updatedIncident.residentId,
+            residentName: updatedIncident.resident.fullName,
+            severity: updatedIncident.severity,
+            status: updatedIncident.status,
+          } satisfies AuditEventDetails,
+        },
+      });
+
+      return updatedIncident;
+    });
+
+    this.managerDashboardStream.publishShiftUpdate(
+      incident.shiftId,
+      'incident-acknowledged',
+    );
+
+    return {
+      incident: mapIncident(incident),
+      resident: await this.getResidentPrioritySnapshot(incident.resident.id),
+    };
+  }
+
+  async resolveManagerIncident(
+    incidentId: string,
+    user: AuthenticatedUser,
+    shiftId: string,
+  ) {
+    const shift = await this.findActiveManagerShiftById(shiftId);
+    const existingIncident = await this.prisma.incident.findUnique({
+      where: {
+        id: incidentId,
+      },
+      include: incidentInclude,
+    });
+
+    if (!existingIncident) {
+      throw new NotFoundException('Incident was not found.');
+    }
+
+    if (!this.incidentMatchesShiftScope(existingIncident, shift)) {
+      throw new NotFoundException('Incident was not found.');
+    }
+
+    if (existingIncident.status !== 'ACKNOWLEDGED') {
+      throw new BadRequestException(
+        'Only acknowledged incidents can be resolved.',
+      );
+    }
+
+    const resolvedAt = new Date();
+    const incident = await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.incident.updateMany({
+        where: {
+          id: incidentId,
+          status: 'ACKNOWLEDGED',
+        },
+        data: {
+          status: 'RESOLVED',
+          resolvedAt,
+          resolvedById: user.userId,
+        },
+      });
+
+      if (transition.count !== 1) {
+        throw new BadRequestException(
+          'Only acknowledged incidents can be resolved.',
+        );
+      }
+
+      const updatedIncident = await tx.incident.findUniqueOrThrow({
+        where: {
+          id: incidentId,
+        },
+        include: incidentInclude,
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          kind: 'INCIDENT_RESOLVED',
+          userId: user.userId,
+          shiftId: updatedIncident.shiftId,
+          details: {
+            incidentId: updatedIncident.id,
+            residentId: updatedIncident.residentId,
+            residentName: updatedIncident.resident.fullName,
+            severity: updatedIncident.severity,
+            status: updatedIncident.status,
+          } satisfies AuditEventDetails,
+        },
+      });
+
+      return updatedIncident;
+    });
+
+    this.managerDashboardStream.publishShiftUpdate(
+      incident.shiftId,
+      'incident-resolved',
+    );
+
+    return {
+      incident: mapIncident(incident),
+      resident: await this.getResidentPrioritySnapshot(incident.resident.id),
+    };
+  }
+
   async getManagerResidents() {
     const residents = await this.prisma.resident.findMany({
+      include: {
+        incidents: {
+          where: {
+            status: {
+              in: activeIncidentStatuses,
+            },
+          },
+          select: {
+            severity: true,
+            status: true,
+          },
+        },
+      },
       orderBy: [{ floorNumber: 'asc' }, { roomNumber: 'asc' }],
     });
 
     return {
-      residents: residents.map((resident) => this.mapManagerResident(resident)),
+      residents: residents.map((resident) => mapManagerResident(resident)),
     };
   }
 
-  async getManagerDashboard() {
-    const activeShift = await this.prisma.shift.findFirst({
+  async getManagerActiveShifts() {
+    const activeShifts = await this.prisma.shift.findMany({
       where: {
         status: 'ACTIVE',
       },
-      include: {
-        assignedUsers: {
-          select: {
-            id: true,
-          },
-        },
-        handover: {
-          include: {
-            acknowledgements: {
-              select: {
-                acknowledgedById: true,
-              },
-            },
-          },
-        },
-        tasks: {
-          include: {
-            resident: {
-              select: {
-                fullName: true,
-                roomLabel: true,
-              },
-            },
-          },
-          orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
-        },
+      select: {
+        id: true,
+        name: true,
+        unitLabel: true,
+        floorNumber: true,
+        startsAt: true,
+        endsAt: true,
       },
       orderBy: {
         startsAt: 'desc',
       },
     });
 
-    if (!activeShift) {
-      throw new NotFoundException('No active shift was found for the manager dashboard.');
-    }
+    return {
+      activeShifts: activeShifts.map((shift) =>
+        this.toManagerShiftSummary(shift),
+      ),
+    };
+  }
 
-    const assignedUserIds = new Set(activeShift.assignedUsers.map((user) => user.id));
+  async getManagerDashboard(shiftId: string) {
+    const activeShift = await this.findActiveDashboardShiftById(shiftId);
+
+    const [incidents, activityFeed] = await Promise.all([
+      this.prisma.incident.findMany({
+        where: {
+          status: {
+            in: activeIncidentStatuses,
+          },
+          resident: {
+            floorNumber: activeShift.floorNumber,
+            unitLabel: activeShift.unitLabel,
+            isActive: true,
+          },
+        },
+        include: {
+          resident: {
+            select: {
+              fullName: true,
+              roomLabel: true,
+            },
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+      }),
+      this.getManagerActivityFeed(activeShift),
+    ]);
+
+    const assignedUserIds = new Set(
+      activeShift.assignedUsers.map((user) => user.id),
+    );
     const acknowledgedUserIds = new Set(
-      activeShift.handover?.acknowledgements.map((item) => item.acknowledgedById) ?? [],
+      activeShift.handover?.acknowledgements.map(
+        (item) => item.acknowledgedById,
+      ) ?? [],
     );
 
     const normalizedTasks = activeShift.tasks.map((task) => ({
       ...task,
-      dashboardStatus: this.getDashboardTaskStatus(task),
+      dashboardStatus: getDashboardTaskStatus(task),
     }));
 
     const overdueTasks = normalizedTasks.filter(
@@ -636,80 +1389,39 @@ export class ResidentsService {
 
     const shiftElapsedRatio =
       (Date.now() - activeShift.startsAt.getTime()) /
-      Math.max(activeShift.endsAt.getTime() - activeShift.startsAt.getTime(), 1);
+      Math.max(
+        activeShift.endsAt.getTime() - activeShift.startsAt.getTime(),
+        1,
+      );
     const shiftCompletionPercent = this.clampNumber(
       Math.round(shiftElapsedRatio * 100),
       0,
       100,
     );
 
-    const exceptionFeed = normalizedTasks
-      .map((task) => {
-        if (task.dashboardStatus === 'ESCALATED') {
-          return {
-            id: task.id,
-            title: task.title,
-            residentName: task.resident?.fullName ?? 'Unit task',
-            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
-            description:
-              task.description ?? 'This item has been escalated for manager attention.',
-            badge: 'ESCALATED',
-            badgeTone: 'warning',
-            dueAt: task.dueAt,
-            priority: 0,
-          };
-        }
-
-        if (task.dashboardStatus === 'OVERDUE') {
-          return {
-            id: task.id,
-            title: task.title,
-            residentName: task.resident?.fullName ?? 'Unit task',
-            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
-            description:
-              task.description ?? 'This task missed its expected care window.',
-            badge: 'MISSED',
-            badgeTone: 'critical',
-            dueAt: task.dueAt,
-            priority: 1,
-          };
-        }
-
-        if (
-          task.dashboardStatus === 'PENDING' &&
-          task.dueAt &&
-          task.dueAt.getTime() - Date.now() <= 90 * 60 * 1000
-        ) {
-          return {
-            id: task.id,
-            title: task.title,
-            residentName: task.resident?.fullName ?? 'Unit task',
-            roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
-            description:
-              task.description ?? 'This task is due soon within the active shift.',
-            badge: 'DUE SOON',
-            badgeTone: 'info',
-            dueAt: task.dueAt,
-            priority: 2,
-          };
-        }
-
-        return null;
-      })
-      .filter((task): task is NonNullable<typeof task> => task !== null)
+    const exceptionFeed = [
+      ...incidents.map((incident) => mapIncidentExceptionFeedItem(incident)),
+      ...normalizedTasks
+        .map((task) => mapTaskExceptionFeedItem(task, activeShift))
+        .filter((item): item is NonNullable<typeof item> => item !== null),
+    ]
       .sort((left, right) => {
-        if (left.priority != right.priority) {
-          return left.priority - right.priority;
+        if (left.rank !== right.rank) {
+          return left.rank - right.rank;
         }
 
-        const leftTime = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const rightTime = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        return leftTime - rightTime;
-      })
-      .slice(0, 3)
-      .map(({ priority: _, ...task }) => task);
+        if (left.kind === 'INCIDENT' && right.kind === 'INCIDENT') {
+          return right.occurredAt.getTime() - left.occurredAt.getTime();
+        }
 
-    const complianceSeries = this.buildManagerComplianceSeries({
+        const leftDueAt = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const rightDueAt = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return leftDueAt - rightDueAt;
+      })
+      .slice(0, 5)
+      .map((item) => stripRank(item));
+
+    const complianceSeries = buildManagerComplianceSeries({
       shiftStartsAt: activeShift.startsAt,
       shiftEndsAt: activeShift.endsAt,
       overdueTasks,
@@ -718,47 +1430,53 @@ export class ResidentsService {
     });
 
     return {
-      activeShift: {
-        id: activeShift.id,
-        name: activeShift.name,
-        unitLabel: activeShift.unitLabel,
-        floorNumber: activeShift.floorNumber,
-        startsAt: activeShift.startsAt,
-        endsAt: activeShift.endsAt,
-      },
+      activeShift: this.toManagerShiftSummary(activeShift),
       metrics: {
         overdueTasks,
         escalatedItems,
         unreadHandovers,
         shiftCompletionPercent,
+        activeIncidents: incidents.length,
       },
+      activityFeed,
       exceptionFeed,
       complianceSeries,
     };
   }
 
-  async createManagerResident(createManagerResidentDto: CreateManagerResidentDto) {
-    const normalizedInput = this.normalizeResidentInput(createManagerResidentDto);
+  async createManagerResident(
+    createManagerResidentDto: CreateManagerResidentDto,
+  ) {
+    const normalizedInput = this.normalizeCreateResidentInput(
+      createManagerResidentDto,
+    );
 
     try {
       const resident = await this.prisma.resident.create({
         data: {
-          fullName: normalizedInput.fullName!,
-          roomNumber: normalizedInput.roomNumber!,
-          roomLabel: normalizedInput.roomLabel!,
-          floorNumber: normalizedInput.floorNumber!,
-          unitLabel: normalizedInput.unitLabel!,
-          recognitionImageKey: normalizedInput.recognitionImageKey!,
-          careSummary: normalizedInput.careSummary!,
-          isActive: createManagerResidentDto.isActive ?? true,
+          fullName: normalizedInput.fullName,
+          roomNumber: normalizedInput.roomNumber,
+          roomLabel: normalizedInput.roomLabel,
+          floorNumber: normalizedInput.floorNumber,
+          unitLabel: normalizedInput.unitLabel,
+          recognitionImageKey: normalizedInput.recognitionImageKey,
+          careSummary: normalizedInput.careSummary,
+          baselinePriority: normalizedInput.baselinePriority,
+          isActive: normalizedInput.isActive,
         },
       });
 
       return {
-        resident: this.mapManagerResident(resident),
+        resident: mapManagerResident({
+          ...resident,
+          incidents: [],
+        }),
       };
     } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         throw new ConflictException(
           'A resident already exists for that floor and room number.',
         );
@@ -781,19 +1499,39 @@ export class ResidentsService {
       throw new NotFoundException('Resident was not found.');
     }
 
+    const normalizedInput = this.normalizeUpdateResidentInput(
+      updateManagerResidentDto,
+    );
+
     try {
       const resident = await this.prisma.resident.update({
         where: {
           id: residentId,
         },
-        data: this.normalizeResidentInput(updateManagerResidentDto),
+        data: normalizedInput,
+        include: {
+          incidents: {
+            where: {
+              status: {
+                in: activeIncidentStatuses,
+              },
+            },
+            select: {
+              severity: true,
+              status: true,
+            },
+          },
+        },
       });
 
       return {
-        resident: this.mapManagerResident(resident),
+        resident: mapManagerResident(resident),
       };
     } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         throw new ConflictException(
           'A resident already exists for that floor and room number.',
         );

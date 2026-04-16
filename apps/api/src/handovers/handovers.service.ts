@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { ShiftStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
+import { type AuditEventDetails } from '../audit-event-details';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -52,7 +54,7 @@ export class HandoversService {
       name: string;
       startsAt: Date;
       endsAt: Date;
-      status: string;
+      status: ShiftStatus;
       floorNumber: number;
       unitLabel: string;
     },
@@ -124,7 +126,7 @@ export class HandoversService {
             shiftId: shift.id,
             details: {
               handoverId: handover.id,
-            },
+            } satisfies AuditEventDetails,
           },
         });
 

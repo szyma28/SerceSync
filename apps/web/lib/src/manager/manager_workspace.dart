@@ -20,6 +20,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
   WorkspaceTab _selectedTab = WorkspaceTab.dashboard;
 
   ManagerDashboardSnapshot? _dashboard;
+  List<ManagerShiftSummary> _activeShifts = const [];
   List<ManagerResidentRecord> _residents = const [];
 
   bool _isDashboardLoading = true;
@@ -29,6 +30,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
   String? _dashboardError;
   String? _residentsError;
   String? _editingResidentId;
+  String? _selectedShiftId;
 
   final _fullNameController = TextEditingController();
   final _roomNumberController = TextEditingController();
@@ -38,6 +40,13 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
 
   String _recognitionImageKey = 'resident-a';
   bool _isActive = true;
+  ManagerResidentPriorityLevel _baselinePriority =
+      ManagerResidentPriorityLevel.green;
+  final Set<String> _incidentActionIds = <String>{};
+  int _dashboardLoadVersion = 0;
+  StreamSubscription<ManagerDashboardLiveUpdate>?
+  _dashboardLiveUpdatesSubscription;
+  String? _dashboardLiveUpdatesShiftId;
 
   @override
   void initState() {
@@ -49,6 +58,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
 
   @override
   void dispose() {
+    _dashboardLiveUpdatesSubscription?.cancel();
     _fullNameController.dispose();
     _roomNumberController.dispose();
     _floorNumberController.dispose();
@@ -66,35 +76,184 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     _careSummaryController.clear();
     _recognitionImageKey = 'resident-a';
     _isActive = true;
+    _baselinePriority = ManagerResidentPriorityLevel.green;
   }
 
-  Future<void> _loadDashboard() async {
+  bool _isCurrentDashboardLoad(int loadVersion) {
+    return mounted && loadVersion == _dashboardLoadVersion;
+  }
+
+  bool _isDashboardShiftUnavailable(ApiException error) {
+    return error.message ==
+        'Active shift was not found for the manager dashboard.';
+  }
+
+  void _cancelDashboardLiveUpdates() {
+    final subscription = _dashboardLiveUpdatesSubscription;
+    _dashboardLiveUpdatesSubscription = null;
+    _dashboardLiveUpdatesShiftId = null;
+    subscription?.cancel();
+  }
+
+  void _handleDashboardLiveUpdate(ManagerDashboardLiveUpdate update) {
+    final activeShiftId = _selectedShiftId ?? _dashboard?.activeShift.id;
+    if (!mounted ||
+        _selectedTab != WorkspaceTab.dashboard ||
+        update.type != ManagerDashboardLiveUpdateType.updated ||
+        activeShiftId == null ||
+        update.shiftId != activeShiftId ||
+        _isDashboardLoading ||
+        _incidentActionIds.isNotEmpty) {
+      return;
+    }
+
+    _loadDashboard(preferredShiftId: update.shiftId);
+  }
+
+  void _syncDashboardLiveUpdates({String? preferredShiftId}) {
+    final targetShiftId =
+        preferredShiftId ?? _selectedShiftId ?? _dashboard?.activeShift.id;
+    if (_selectedTab != WorkspaceTab.dashboard || targetShiftId == null) {
+      _cancelDashboardLiveUpdates();
+      return;
+    }
+
+    if (_dashboardLiveUpdatesShiftId == targetShiftId &&
+        _dashboardLiveUpdatesSubscription != null) {
+      return;
+    }
+
+    _cancelDashboardLiveUpdates();
+    _dashboardLiveUpdatesShiftId = targetShiftId;
+    _dashboardLiveUpdatesSubscription = widget.apiClient
+        .watchDashboard(
+          accessToken: widget.session.accessToken,
+          shiftId: targetShiftId,
+        )
+        .listen(_handleDashboardLiveUpdate);
+  }
+
+  String _resolveDashboardShiftId(
+    List<ManagerShiftSummary> activeShifts, {
+    String? preferredShiftId,
+  }) {
+    final candidateShiftIds = [
+      preferredShiftId,
+      _selectedShiftId,
+      _dashboard?.activeShift.id,
+    ];
+
+    for (final candidateShiftId in candidateShiftIds) {
+      if (candidateShiftId != null &&
+          activeShifts.any((shift) => shift.id == candidateShiftId)) {
+        return candidateShiftId;
+      }
+    }
+
+    return activeShifts.first.id;
+  }
+
+  Future<void> _loadDashboard({
+    String? preferredShiftId,
+    bool clearSnapshot = false,
+  }) async {
+    final loadVersion = ++_dashboardLoadVersion;
+
     setState(() {
       _isDashboardLoading = true;
       _dashboardError = null;
+      if (clearSnapshot) {
+        _dashboard = null;
+      }
     });
 
     try {
-      final dashboard = await widget.apiClient.getDashboard(
+      var activeShifts = await widget.apiClient.getActiveShifts(
         accessToken: widget.session.accessToken,
       );
-      if (!mounted) return;
+
+      if (!_isCurrentDashboardLoad(loadVersion)) return;
+
+      if (activeShifts.isEmpty) {
+        setState(() {
+          _activeShifts = const [];
+          _selectedShiftId = null;
+          _dashboard = null;
+        });
+        _syncDashboardLiveUpdates();
+        return;
+      }
+
+      var selectedShiftId = _resolveDashboardShiftId(
+        activeShifts,
+        preferredShiftId: preferredShiftId,
+      );
+
+      late final ManagerDashboardSnapshot dashboard;
+      try {
+        dashboard = await widget.apiClient.getDashboard(
+          accessToken: widget.session.accessToken,
+          shiftId: selectedShiftId,
+        );
+      } on ApiException catch (error) {
+        if (!_isCurrentDashboardLoad(loadVersion)) return;
+        if (!_isDashboardShiftUnavailable(error)) {
+          rethrow;
+        }
+
+        activeShifts = await widget.apiClient.getActiveShifts(
+          accessToken: widget.session.accessToken,
+        );
+
+        if (!_isCurrentDashboardLoad(loadVersion)) return;
+
+        if (activeShifts.isEmpty) {
+          setState(() {
+            _activeShifts = const [];
+            _selectedShiftId = null;
+            _dashboard = null;
+          });
+          _syncDashboardLiveUpdates();
+          return;
+        }
+
+        selectedShiftId = _resolveDashboardShiftId(activeShifts);
+        dashboard = await widget.apiClient.getDashboard(
+          accessToken: widget.session.accessToken,
+          shiftId: selectedShiftId,
+        );
+      }
+
+      if (!_isCurrentDashboardLoad(loadVersion)) return;
       setState(() {
+        _activeShifts = activeShifts;
+        _selectedShiftId = selectedShiftId;
         _dashboard = dashboard;
       });
+      _syncDashboardLiveUpdates(preferredShiftId: selectedShiftId);
     } on ApiException catch (error) {
-      if (!mounted) return;
-      setState(() => _dashboardError = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _dashboardError = 'Unable to load the unit overview right now.',
-      );
+      if (!_isCurrentDashboardLoad(loadVersion)) return;
+      setState(() {
+        _dashboardError = error.message;
+        _dashboard = null;
+      });
+      _syncDashboardLiveUpdates();
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardLoad(loadVersion)) {
         setState(() => _isDashboardLoading = false);
       }
     }
+  }
+
+  Future<void> _selectDashboardShift(String shiftId) async {
+    if (shiftId == _selectedShiftId &&
+        _dashboard?.activeShift.id == shiftId &&
+        !_isDashboardLoading) {
+      return;
+    }
+
+    _cancelDashboardLiveUpdates();
+    await _loadDashboard(preferredShiftId: shiftId, clearSnapshot: true);
   }
 
   Future<void> _loadResidents() async {
@@ -114,11 +273,6 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _residentsError = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _residentsError = 'Unable to load resident records right now.',
-      );
     } finally {
       if (mounted) {
         setState(() => _isResidentsLoading = false);
@@ -130,8 +284,10 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     switch (_selectedTab) {
       case WorkspaceTab.dashboard:
         await _loadDashboard();
+        break;
       case WorkspaceTab.residents:
         await _loadResidents();
+        break;
       case WorkspaceTab.staff:
       case WorkspaceTab.compliance:
       case WorkspaceTab.console:
@@ -141,7 +297,12 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
             content: Text('This workspace section is not wired up yet.'),
           ),
         );
+        break;
     }
+  }
+
+  Future<void> _refreshOperationalData() async {
+    await Future.wait([_loadDashboard(), _loadResidents()]);
   }
 
   void _startCreateResident() {
@@ -158,6 +319,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
       _careSummaryController.text = resident.careSummary;
       _recognitionImageKey = resident.recognitionImageKey;
       _isActive = resident.isActive;
+      _baselinePriority = resident.baselinePriority;
     });
   }
 
@@ -190,6 +352,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
       recognitionImageKey: _recognitionImageKey,
       careSummary: _careSummaryController.text.trim(),
       isActive: _isActive,
+      baselinePriority: _baselinePriority,
     );
 
     try {
@@ -215,14 +378,84 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _residentsError = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _residentsError = 'Unable to save the resident record.');
     } finally {
       if (mounted) {
         setState(() => _isSavingResident = false);
       }
     }
+  }
+
+  Future<void> _runIncidentAction({
+    required String incidentId,
+    required Future<void> Function() action,
+    required String successMessage,
+  }) async {
+    if (_incidentActionIds.contains(incidentId)) {
+      return;
+    }
+
+    setState(() {
+      _incidentActionIds.add(incidentId);
+      _dashboardError = null;
+    });
+
+    try {
+      await action();
+      await _refreshOperationalData();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _incidentActionIds.remove(incidentId);
+        });
+      }
+    }
+  }
+
+  String _requireSelectedShiftId() {
+    final selectedShiftId = _selectedShiftId ?? _dashboard?.activeShift.id;
+    if (selectedShiftId == null) {
+      throw StateError(
+        'A dashboard shift must be selected before incident actions run.',
+      );
+    }
+    return selectedShiftId;
+  }
+
+  Future<void> _acknowledgeIncident(String incidentId) {
+    final selectedShiftId = _requireSelectedShiftId();
+
+    return _runIncidentAction(
+      incidentId: incidentId,
+      action: () => widget.apiClient.acknowledgeIncident(
+        accessToken: widget.session.accessToken,
+        incidentId: incidentId,
+        shiftId: selectedShiftId,
+      ),
+      successMessage: 'Incident acknowledged.',
+    );
+  }
+
+  Future<void> _resolveIncident(String incidentId) {
+    final selectedShiftId = _requireSelectedShiftId();
+
+    return _runIncidentAction(
+      incidentId: incidentId,
+      action: () => widget.apiClient.resolveIncident(
+        accessToken: widget.session.accessToken,
+        incidentId: incidentId,
+        shiftId: selectedShiftId,
+      ),
+      successMessage: 'Incident resolved.',
+    );
   }
 
   void _exportWorkspaceData() {
@@ -246,6 +479,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     }
 
     setState(() => _selectedTab = tab);
+    _syncDashboardLiveUpdates();
   }
 
   String _headerTitle() {
@@ -341,9 +575,20 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
                                                     'dashboard',
                                                   ),
                                                   dashboard: _dashboard,
+                                                  activeShifts: _activeShifts,
+                                                  selectedShiftId:
+                                                      _selectedShiftId,
                                                   isLoading:
                                                       _isDashboardLoading,
                                                   errorMessage: _dashboardError,
+                                                  pendingIncidentIds:
+                                                      _incidentActionIds,
+                                                  onShiftSelected:
+                                                      _selectDashboardShift,
+                                                  onAcknowledgeIncident:
+                                                      _acknowledgeIncident,
+                                                  onResolveIncident:
+                                                      _resolveIncident,
                                                 ),
                                               WorkspaceTab.residents =>
                                                 _ResidentsManagement(
@@ -370,6 +615,8 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
                                                   recognitionImageKey:
                                                       _recognitionImageKey,
                                                   isActive: _isActive,
+                                                  baselinePriority:
+                                                      _baselinePriority,
                                                   onRecognitionImageChanged:
                                                       (value) => setState(
                                                         () =>
@@ -379,6 +626,12 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
                                                   onActiveChanged: (value) =>
                                                       setState(
                                                         () => _isActive = value,
+                                                      ),
+                                                  onBaselinePriorityChanged:
+                                                      (value) => setState(
+                                                        () =>
+                                                            _baselinePriority =
+                                                                value,
                                                       ),
                                                   onCreateResident:
                                                       _startCreateResident,

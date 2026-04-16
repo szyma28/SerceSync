@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/handover.dart';
+import '../models/shared_models.dart';
 import '../models/task.dart';
 import '../models/user.dart';
 import '../theme/app_theme.dart';
+import '../widgets/screen_message_state.dart';
 import '../widgets/task_card.dart';
 
 class TaskBoardScreen extends StatefulWidget {
@@ -49,8 +51,6 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
       if (mounted) setState(() => _tasks = tasks);
     } on ApiException catch (e) {
       if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _errorMessage = 'Failed to load tasks.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -60,8 +60,7 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent, // Important for our custom modal background
+      backgroundColor: Colors.transparent,
       builder: (context) => _TaskActionSheet(
         task: task,
         apiClient: widget.apiClient,
@@ -76,109 +75,38 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
 
   Widget _buildEmptyState(String filter) {
     final bool isAllTasks = filter == 'All Tasks';
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              isAllTasks
-                  ? 'assets/images/Resident.png'
-                  : 'assets/images/Nurse03.png',
-              height: 200,
-            ),
-            const SizedBox(height: 32),
-            Text(
-              isAllTasks ? 'No Tasks Assigned' : 'All Caught Up!',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: AppTheme.primaryBlueDark,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              isAllTasks
-                  ? 'There are currently no tasks assigned for this shift yet. Enjoy the quiet moment.'
-                  : 'You have no pending tasks in the "$filter" view.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return ScreenMessageState(
+      imageAssetPath: isAllTasks
+          ? 'assets/images/Resident.png'
+          : 'assets/images/Nurse03.png',
+      imageHeight: 200,
+      title: isAllTasks ? 'No Tasks Assigned' : 'All Caught Up!',
+      titleStyle: Theme.of(
+        context,
+      ).textTheme.headlineSmall?.copyWith(color: AppTheme.primaryBlueDark),
+      message: isAllTasks
+          ? 'There are currently no tasks assigned for this shift yet. Enjoy the quiet moment.'
+          : 'You have no pending tasks in the "$filter" view.',
+      messageStyle: Theme.of(
+        context,
+      ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
     );
   }
 
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              height: 220,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  IgnorePointer(
-                    child: Container(
-                      width: 240,
-                      height: 170,
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          colors: [
-                            AppTheme.primaryBlueLight.withAlpha(120),
-                            AppTheme.primaryBlueLight.withAlpha(24),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.0, 0.6, 1.0],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Opacity(
-                    opacity: 0.96,
-                    child: Image.asset(
-                      'assets/images/404error_transparent.png',
-                      height: 200,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-            Text(
-              'Couldn\'t load tasks',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(color: AppTheme.errorRed),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _errorMessage ?? 'Unknown error occurred.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            Container(
-              decoration: BoxDecoration(boxShadow: AppTheme.premiumShadow),
-              child: FilledButton.icon(
-                onPressed: _fetchTasks,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try Again'),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return ScreenMessageState(
+      imageAssetPath: 'assets/images/404error_transparent.png',
+      imageHeight: 200,
+      title: 'Couldn\'t load tasks',
+      titleStyle: Theme.of(
+        context,
+      ).textTheme.headlineSmall?.copyWith(color: AppTheme.errorRed),
+      message: _errorMessage ?? 'Unknown error occurred.',
+      messageStyle: Theme.of(
+        context,
+      ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
+      actionLabel: 'Try Again',
+      onAction: _fetchTasks,
     );
   }
 
@@ -189,16 +117,16 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
       displayedTasks = _tasks
           .where(
             (t) =>
-                t.status.toLowerCase() != 'completed' &&
-                t.status.toLowerCase() != 'deferred',
+                t.status != TaskStatus.completed &&
+                t.status != TaskStatus.deferred,
           )
           .toList();
     } else if (_filter == 'Priority') {
       displayedTasks = _tasks
           .where(
             (t) =>
-                t.status.toLowerCase() == 'overdue' ||
-                t.status.toLowerCase() == 'escalated',
+                t.status == TaskStatus.overdue ||
+                t.status == TaskStatus.escalated,
           )
           .toList();
     }
@@ -208,7 +136,7 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          toolbarHeight: 70, // Slightly taller for breathing room
+          toolbarHeight: 70,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -238,7 +166,6 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              // Filter Pills nested inside transparency
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: SingleChildScrollView(
@@ -291,7 +218,6 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
                 ),
               ),
 
-              // Task List
               Expanded(
                 child: _isLoading && _tasks.isEmpty
                     ? const Center(
@@ -340,7 +266,7 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
               currentIndex: 0,
               type: BottomNavigationBarType.fixed,
               backgroundColor: Colors.white,
-              elevation: 0, // Elevation is handled by container shadow
+              elevation: 0,
               selectedLabelStyle: const TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
@@ -452,8 +378,6 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
       widget.onActionCompleted();
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'An error occurred.');
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
@@ -472,19 +396,12 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
         alignment: Alignment.topCenter,
         children: [
           Container(
-            margin: EdgeInsets.only(
-              top: showReasonInput ? 90 : 0,
-            ), // Push card down if illustration active
+            margin: EdgeInsets.only(top: showReasonInput ? 90 : 0),
             decoration: const BoxDecoration(
               color: AppTheme.surfaceCard,
               borderRadius: BorderRadius.vertical(top: Radius.circular(40)),
             ),
-            padding: EdgeInsets.fromLTRB(
-              32,
-              showReasonInput ? 80 : 32,
-              32,
-              40,
-            ), // Padding accounts for overlap
+            padding: EdgeInsets.fromLTRB(32, showReasonInput ? 80 : 32, 32, 40),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -567,8 +484,7 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                             ? 'Note (optional)'
                             : 'Reason for ${_actionType}ing (required)',
                         alignLabelWithHint: true,
-                        fillColor:
-                            Colors.transparent, // Inherited from Container
+                        fillColor: Colors.transparent,
                       ),
                     ),
                   ),
@@ -647,7 +563,7 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                       ),
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Mark as Complete'),
-                      onPressed: widget.task.status.toLowerCase() == 'completed'
+                      onPressed: widget.task.status == TaskStatus.completed
                           ? null
                           : () => _performAction('complete'),
                     ),
@@ -687,7 +603,6 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
             ),
           ),
 
-          // Floating Illustration Context
           if (showReasonInput)
             Positioned(
               top: 0,

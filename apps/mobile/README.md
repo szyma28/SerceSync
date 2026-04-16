@@ -1,17 +1,13 @@
-# sercesync_mobile
+# SerceSync Mobile
 
-A new Flutter project.
+Flutter client for carers and senior carers.
 
-## Getting Started
+It covers login, handover acknowledgement, priorities, residents, and `My Shift`.
 
-This project is a starting point for a Flutter application.
+## Run
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter run --dart-define=API_BASE_URL=http://localhost:3000
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+If `API_BASE_URL` is omitted, the app defaults to `http://localhost:3000`.

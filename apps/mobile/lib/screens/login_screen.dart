@@ -59,10 +59,6 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on ApiException catch (error) {
       if (mounted) setState(() => _errorMessage = error.message);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _errorMessage = 'An unexpected error occurred.');
-      }
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
@@ -76,8 +72,6 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // 1. ATMOSPHERIC BACKGROUND TIER
-          // Spans exactly 75% of screen height to create a deeply blended transition into the white
           Positioned(
             top: 0,
             left: 0,
@@ -88,33 +82,22 @@ class _LoginScreenState extends State<LoginScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFFE0F2FE), // Light sky blue top
-                    Color(0xFFCCFBF1), // Soft teal body
-                    Colors
-                        .white, // Seamless fade into the lower white background
-                  ],
-                  stops: [
-                    0.0,
-                    0.6,
-                    1.0,
-                  ], // Gradient fades to white over the bottom 40%
+                  colors: [Color(0xFFE0F2FE), Color(0xFFCCFBF1), Colors.white],
+                  stops: [0.0, 0.6, 1.0],
                 ),
               ),
             ),
           ),
 
-          // 2. DOMINANT HERO ILLUSTRATION
           Positioned(
             top: 0,
             left: 0,
             right: 0,
-            height: screenHeight * 0.65, // Extends far down
+            height: screenHeight * 0.65,
             child: SafeArea(
               bottom: false,
               child: Padding(
                 padding: const EdgeInsets.only(top: 24.0),
-                // First ShaderMask: Fade the horizontal edges so it doesn't look like a solid box
                 child: ShaderMask(
                   shaderCallback: (Rect bounds) {
                     return const LinearGradient(
@@ -130,7 +113,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ).createShader(bounds);
                   },
                   blendMode: BlendMode.dstIn,
-                  // Second ShaderMask: Fade the bottom edge so the drawing seamlessly merges into the gradient
                   child: ShaderMask(
                     shaderCallback: (Rect bounds) {
                       return const LinearGradient(
@@ -146,8 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     },
                     blendMode: BlendMode.dstIn,
                     child: Transform.scale(
-                      scale:
-                          1.15, // Dialed back scale slightly for better balance
+                      scale: 1.15,
                       alignment: Alignment.bottomCenter,
                       child: Image.asset(
                         'assets/images/NurseThumbsUp_Logo.png',
@@ -161,8 +142,6 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
 
-          // 3. SECONDARY COMPACT LOGIN BOX
-          // Uses CustomScrollView to guarantee it is anchored securely at the bottom of the screen while preserving keyboard scrolling safety
           Positioned.fill(
             child: CustomScrollView(
               slivers: [
@@ -170,8 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   hasScrollBody: false,
                   child: SafeArea(
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment
-                          .end, // Force anchoring to the bottom
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         Padding(
                           padding: const EdgeInsets.fromLTRB(
@@ -179,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             0,
                             36.0,
                             32.0,
-                          ), // Compact horizontal limits, extremely tight bottom constraint
+                          ),
                           child: Container(
                             padding: const EdgeInsets.all(20.0),
                             decoration: BoxDecoration(
@@ -197,7 +175,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                // Compact Email Field
                                 Container(
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFF8FAFC),
@@ -235,7 +212,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 const SizedBox(height: 12),
 
-                                // Compact Password Field
                                 Container(
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFF8FAFC),
@@ -305,7 +281,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                 const SizedBox(height: 24),
 
-                                // Primary Button
                                 FilledButton(
                                   onPressed: _isBusy ? null : _login,
                                   style: FilledButton.styleFrom(

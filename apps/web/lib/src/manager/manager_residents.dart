@@ -15,8 +15,10 @@ class _ResidentsManagement extends StatelessWidget {
     required this.careSummaryController,
     required this.recognitionImageKey,
     required this.isActive,
+    required this.baselinePriority,
     required this.onRecognitionImageChanged,
     required this.onActiveChanged,
+    required this.onBaselinePriorityChanged,
     required this.onCreateResident,
     required this.onEditResident,
     required this.onSaveResident,
@@ -34,8 +36,10 @@ class _ResidentsManagement extends StatelessWidget {
   final TextEditingController careSummaryController;
   final String recognitionImageKey;
   final bool isActive;
+  final ManagerResidentPriorityLevel baselinePriority;
   final ValueChanged<String> onRecognitionImageChanged;
   final ValueChanged<bool> onActiveChanged;
+  final ValueChanged<ManagerResidentPriorityLevel> onBaselinePriorityChanged;
   final VoidCallback onCreateResident;
   final ValueChanged<ManagerResidentRecord> onEditResident;
   final Future<void> Function() onSaveResident;
@@ -78,8 +82,10 @@ class _ResidentsManagement extends StatelessWidget {
                 careSummaryController: careSummaryController,
                 recognitionImageKey: recognitionImageKey,
                 isActive: isActive,
+                baselinePriority: baselinePriority,
                 onRecognitionImageChanged: onRecognitionImageChanged,
                 onActiveChanged: onActiveChanged,
+                onBaselinePriorityChanged: onBaselinePriorityChanged,
                 onCreateResident: onCreateResident,
                 onSaveResident: onSaveResident,
               ),
@@ -195,6 +201,11 @@ class _ResidentDirectoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final priorityTone = _residentPriorityToneFor(resident.effectivePriority);
+    final incidentCountLabel = resident.activeIncidentCount == 1
+        ? '1 active incident'
+        : '${resident.activeIncidentCount} active incidents';
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -231,6 +242,34 @@ class _ResidentDirectoryRow extends StatelessWidget {
                     _ResidentMetaPill(label: resident.roomLabel),
                     _ResidentMetaPill(label: resident.unitLabel),
                     _ResidentMetaPill(label: 'Floor ${resident.floorNumber}'),
+                    _ResidentMetaPill(
+                      label:
+                          'Priority ${resident.effectivePriority.label.toUpperCase()}',
+                      foreground: priorityTone.foreground,
+                      background: priorityTone.background,
+                    ),
+                    _ResidentMetaPill(
+                      label: incidentCountLabel,
+                      foreground: resident.activeIncidentCount > 0
+                          ? _managerCritical
+                          : _managerMuted,
+                      background: resident.activeIncidentCount > 0
+                          ? _managerCriticalSoft
+                          : const Color(0xFFF0F4F8),
+                    ),
+                    _ResidentMetaPill(
+                      label: resident.prioritySource.label,
+                      foreground:
+                          resident.prioritySource ==
+                              ManagerResidentPrioritySource.incidentOverride
+                          ? _managerWarning
+                          : _managerMuted,
+                      background:
+                          resident.prioritySource ==
+                              ManagerResidentPrioritySource.incidentOverride
+                          ? _managerWarningSoft
+                          : const Color(0xFFF0F4F8),
+                    ),
                     _ResidentMetaPill(
                       label: resident.isActive ? 'Active' : 'Inactive',
                       foreground: resident.isActive
@@ -313,8 +352,10 @@ class _ResidentEditorCard extends StatelessWidget {
     required this.careSummaryController,
     required this.recognitionImageKey,
     required this.isActive,
+    required this.baselinePriority,
     required this.onRecognitionImageChanged,
     required this.onActiveChanged,
+    required this.onBaselinePriorityChanged,
     required this.onCreateResident,
     required this.onSaveResident,
   });
@@ -328,8 +369,10 @@ class _ResidentEditorCard extends StatelessWidget {
   final TextEditingController careSummaryController;
   final String recognitionImageKey;
   final bool isActive;
+  final ManagerResidentPriorityLevel baselinePriority;
   final ValueChanged<String> onRecognitionImageChanged;
   final ValueChanged<bool> onActiveChanged;
+  final ValueChanged<ManagerResidentPriorityLevel> onBaselinePriorityChanged;
   final VoidCallback onCreateResident;
   final Future<void> Function() onSaveResident;
 
@@ -397,6 +440,27 @@ class _ResidentEditorCard extends StatelessWidget {
             decoration: const InputDecoration(labelText: 'Unit Label'),
           ),
           const SizedBox(height: 12),
+          DropdownButtonFormField<ManagerResidentPriorityLevel>(
+            key: ValueKey(
+              'resident-baseline-priority-${editingResidentId ?? 'new'}-$baselinePriority',
+            ),
+            initialValue: baselinePriority,
+            decoration: const InputDecoration(labelText: 'Baseline Priority'),
+            items: ManagerResidentPriorityLevel.values
+                .map(
+                  (priority) => DropdownMenuItem(
+                    value: priority,
+                    child: Text(priority.baselineLabel),
+                  ),
+                )
+                .toList(growable: false),
+            onChanged: (value) {
+              if (value != null) {
+                onBaselinePriorityChanged(value);
+              }
+            },
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             key: ValueKey('photo-$recognitionImageKey-$editingResidentId'),
             initialValue: recognitionImageKey,
@@ -454,5 +518,37 @@ class _ResidentEditorCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ResidentPriorityTone {
+  const _ResidentPriorityTone({
+    required this.foreground,
+    required this.background,
+  });
+
+  final Color foreground;
+  final Color background;
+}
+
+_ResidentPriorityTone _residentPriorityToneFor(
+  ManagerResidentPriorityLevel priority,
+) {
+  switch (priority) {
+    case ManagerResidentPriorityLevel.red:
+      return const _ResidentPriorityTone(
+        foreground: _managerCritical,
+        background: _managerCriticalSoft,
+      );
+    case ManagerResidentPriorityLevel.amber:
+      return const _ResidentPriorityTone(
+        foreground: _managerWarning,
+        background: _managerWarningSoft,
+      );
+    case ManagerResidentPriorityLevel.green:
+      return const _ResidentPriorityTone(
+        foreground: _managerSuccess,
+        background: _managerSuccessSoft,
+      );
   }
 }

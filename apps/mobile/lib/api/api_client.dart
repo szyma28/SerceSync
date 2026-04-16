@@ -177,6 +177,10 @@ class SerceSyncApiClient {
       request.headers['Authorization'] = 'Bearer $accessToken';
       request.fields['type'] = draft.type.apiValue;
       request.fields['details'] = draft.details;
+      if (draft.personalCareSubtype != null) {
+        request.fields['personalCareSubtype'] =
+            draft.personalCareSubtype!.apiValue;
+      }
       request.files.add(
         http.MultipartFile.fromBytes(
           'evidence',
@@ -206,6 +210,53 @@ class SerceSyncApiClient {
     final decoded = _decodeJson(response);
     return ResidentTimelineEntry.fromJson(
       decoded['entry'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ResidentIncident> createResidentIncident({
+    required String accessToken,
+    required String residentId,
+    required ResidentIncidentDraft draft,
+  }) async {
+    if (draft.evidence != null) {
+      final request = http.MultipartRequest(
+        'POST',
+        _uri('/residents/$residentId/incidents'),
+      );
+      request.headers['Authorization'] = 'Bearer $accessToken';
+      request.fields['severity'] = draft.severity.apiValue;
+      request.fields['category'] = draft.category.apiValue;
+      request.fields['title'] = draft.title;
+      request.fields['details'] = draft.details;
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'evidence',
+          draft.evidence!.bytes,
+          filename: draft.evidence!.fileName,
+          contentType: _mediaTypeHeaderValue(draft.evidence!.mediaType),
+        ),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final decoded = _decodeJson(response);
+      return ResidentIncident.fromJson(
+        decoded['incident'] as Map<String, dynamic>,
+      );
+    }
+
+    final response = await http.post(
+      _uri('/residents/$residentId/incidents'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(draft.toJson()),
+    );
+
+    final decoded = _decodeJson(response);
+    return ResidentIncident.fromJson(
+      decoded['incident'] as Map<String, dynamic>,
     );
   }
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../models/shared_models.dart';
 import '../models/task.dart';
 import '../theme/app_theme.dart';
+import 'date_time_formatters.dart';
 import 'status_chip.dart';
 
 class TaskCard extends StatelessWidget {
@@ -10,17 +12,15 @@ class TaskCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   Color get _borderColor {
-    switch (task.status.toLowerCase()) {
-      case 'overdue':
-      case 'escalated':
+    switch (task.status) {
+      case TaskStatus.overdue:
+      case TaskStatus.escalated:
         return AppTheme.errorRed;
-      case 'deferred':
+      case TaskStatus.deferred:
         return AppTheme.warningYellow;
-      case 'completed':
+      case TaskStatus.completed:
         return AppTheme.successGreen;
-      case 'routine':
-      case 'pending':
-      default:
+      case TaskStatus.pending:
         return AppTheme.primaryBlue;
     }
   }
@@ -38,14 +38,13 @@ class TaskCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: AppTheme.premiumShadow,
         border: Border.all(
-          color: task.status.toLowerCase() == 'completed'
+          color: task.status == TaskStatus.completed
               ? AppTheme.borderLight
               : _borderColor.withAlpha(80),
           width: 1.5,
         ),
       ),
-      clipBehavior:
-          Clip.antiAlias, // To clip the inkwell and potential watermark
+      clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
           if (_isMeds)
@@ -70,7 +69,6 @@ class TaskCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Status icon or indicator
                   Container(
                     width: 48,
                     height: 48,
@@ -79,7 +77,7 @@ class TaskCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      task.status.toLowerCase() == 'completed'
+                      task.status == TaskStatus.completed
                           ? Icons.task_alt_rounded
                           : _isMeds
                           ? Icons.medical_services_outlined
@@ -90,7 +88,6 @@ class TaskCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 16),
 
-                  // Task details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,7 +105,7 @@ class TaskCard extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '${task.dueAt!.hour.toString().padLeft(2, '0')}:${task.dueAt!.minute.toString().padLeft(2, '0')}',
+                                    formatHourMinute(task.dueAt!),
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium

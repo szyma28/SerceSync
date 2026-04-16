@@ -1,41 +1,38 @@
 import 'package:flutter/material.dart';
+import '../models/shared_models.dart';
 import '../theme/app_theme.dart';
 
 class StatusChip extends StatelessWidget {
   const StatusChip({super.key, required this.status, this.compact = false});
 
-  final String status;
+  final TaskStatus status;
   final bool compact;
 
   Color get _color {
-    switch (status.toLowerCase()) {
-      case 'overdue':
-      case 'escalated':
+    switch (status) {
+      case TaskStatus.overdue:
+      case TaskStatus.escalated:
         return AppTheme.errorRed;
-      case 'deferred':
+      case TaskStatus.deferred:
         return AppTheme.warningYellow;
-      case 'completed':
+      case TaskStatus.completed:
         return AppTheme.successGreen;
-      case 'routine':
-      case 'pending':
-      default:
+      case TaskStatus.pending:
         return AppTheme.primaryBlue;
     }
   }
 
   IconData? get _icon {
-    switch (status.toLowerCase()) {
-      case 'overdue':
+    switch (status) {
+      case TaskStatus.overdue:
         return Icons.timer_off_outlined;
-      case 'escalated':
+      case TaskStatus.escalated:
         return Icons.warning_amber_rounded;
-      case 'deferred':
+      case TaskStatus.deferred:
         return Icons.schedule;
-      case 'completed':
+      case TaskStatus.completed:
         return Icons.check_circle_outline;
-      case 'routine':
-      case 'pending':
-      default:
+      case TaskStatus.pending:
         return null;
     }
   }
@@ -63,7 +60,7 @@ class StatusChip extends StatelessWidget {
             SizedBox(width: compact ? 4 : 6),
           ],
           Text(
-            status.toUpperCase(),
+            status.apiValue,
             style: TextStyle(
               color: color,
               fontSize: compact ? 10 : 12,

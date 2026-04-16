@@ -1,11 +1,11 @@
 {
-    "name": "sercesync_web",
-    "short_name": "sercesync_web",
+    "name": "SerceSync Manager",
+    "short_name": "SerceSync",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "SerceSync manager dashboard.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

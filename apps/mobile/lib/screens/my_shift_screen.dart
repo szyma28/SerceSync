@@ -5,6 +5,7 @@ import '../models/handover.dart';
 import '../models/user.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/date_time_formatters.dart';
 
 class MyShiftScreen extends StatefulWidget {
   const MyShiftScreen({
@@ -55,9 +56,6 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Failed to load shift assignments.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -97,7 +95,7 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _InfoRow(label: 'Carer', value: widget.user.displayName),
-                    _InfoRow(label: 'Role', value: widget.user.role),
+                    _InfoRow(label: 'Role', value: widget.user.role.label),
                     _InfoRow(
                       label: 'Assignment',
                       value: currentShift != null
@@ -107,8 +105,8 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                     _InfoRow(
                       label: 'Shift',
                       value: currentShift != null
-                          ? '${_time(currentShift.startsAt)} - ${_time(currentShift.endsAt)}'
-                          : '${_time(widget.snapshot.shift.startsAt)} - ${_time(widget.snapshot.shift.endsAt)}',
+                          ? '${formatHourMinute(currentShift.startsAt)} - ${formatHourMinute(currentShift.endsAt)}'
+                          : '${formatHourMinute(widget.snapshot.shift.startsAt)} - ${formatHourMinute(widget.snapshot.shift.endsAt)}',
                     ),
                     _InfoRow(
                       label: 'Handover',
@@ -180,20 +178,14 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
   String _handoverValue(ShiftAssignment? currentShift) {
     if (currentShift != null) {
       if (currentShift.handoverAcknowledged) {
-        return 'Acknowledged at ${_time(currentShift.handoverAcknowledgedAt ?? currentShift.startsAt)}';
+        return 'Acknowledged at ${formatHourMinute(currentShift.handoverAcknowledgedAt ?? currentShift.startsAt)}';
       }
       return 'Pending acknowledgement';
     }
 
     return widget.snapshot.acknowledged
-        ? 'Acknowledged at ${_time(widget.snapshot.acknowledgedAt ?? widget.snapshot.shift.startsAt)}'
+        ? 'Acknowledged at ${formatHourMinute(widget.snapshot.acknowledgedAt ?? widget.snapshot.shift.startsAt)}'
         : 'Pending acknowledgement';
-  }
-
-  static String _time(DateTime value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
   }
 }
 
@@ -251,13 +243,13 @@ class _AssignmentsList extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: entry.status == 'ACTIVE'
+                      color: entry.status == ShiftStatus.active
                           ? AppTheme.primaryBlueLight
                           : const Color(0xFFE8EEF5),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      entry.status == 'ACTIVE'
+                      entry.status == ShiftStatus.active
                           ? Icons.play_circle_outline_rounded
                           : Icons.calendar_month_outlined,
                       color: AppTheme.primaryBlueDark,
@@ -279,7 +271,7 @@ class _AssignmentsList extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '${_time(entry.startsAt)} - ${_time(entry.endsAt)} · ${entry.status}',
+                          '${formatHourMinute(entry.startsAt)} - ${formatHourMinute(entry.endsAt)} · ${entry.status.label}',
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: AppTheme.textSecondary,
@@ -310,12 +302,6 @@ class _AssignmentsList extends StatelessWidget {
     if (startDay == today) return 'Today';
     if (startDay == tomorrow) return 'Tomorrow';
     return 'Next Scheduled';
-  }
-
-  static String _time(DateTime value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
   }
 }
 

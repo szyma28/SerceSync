@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This note captures follow-up product ideas raised during review of the current SerceSync flows so they stay visible for future planning rather than getting lost in session history.
+This note records follow-up product ideas from the SerceSync flow review for later planning.
 
 Date captured: 2026-04-12
 
@@ -82,4 +82,3 @@ When this work is picked up, it would make sense to split it into separate imple
 - meal intake logging
 - incident workflow and manager alerting
 - medication safety indicators
-

@@ -4,13 +4,25 @@ class _DashboardOverview extends StatelessWidget {
   const _DashboardOverview({
     super.key,
     required this.dashboard,
+    required this.activeShifts,
+    required this.selectedShiftId,
     required this.isLoading,
     required this.errorMessage,
+    required this.onShiftSelected,
+    required this.pendingIncidentIds,
+    required this.onAcknowledgeIncident,
+    required this.onResolveIncident,
   });
 
   final ManagerDashboardSnapshot? dashboard;
+  final List<ManagerShiftSummary> activeShifts;
+  final String? selectedShiftId;
   final bool isLoading;
   final String? errorMessage;
+  final ValueChanged<String> onShiftSelected;
+  final Set<String> pendingIncidentIds;
+  final Future<void> Function(String incidentId) onAcknowledgeIncident;
+  final Future<void> Function(String incidentId) onResolveIncident;
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +37,10 @@ class _DashboardOverview extends StatelessWidget {
       return _ErrorSurface(message: errorMessage!);
     }
 
+    if (activeShifts.isEmpty) {
+      return const _DashboardEmptyState();
+    }
+
     final data = dashboard;
     if (data == null) {
       return const _ErrorSurface(
@@ -35,7 +51,7 @@ class _DashboardOverview extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final metricColumns = constraints.maxWidth >= 1120
-            ? 4
+            ? 5
             : constraints.maxWidth >= 760
             ? 2
             : 1;
@@ -47,10 +63,30 @@ class _DashboardOverview extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _DashboardShiftScopeCard(
+              activeShifts: activeShifts,
+              selectedShiftId: selectedShiftId ?? data.activeShift.id,
+              activeShift: data.activeShift,
+              onShiftSelected: onShiftSelected,
+            ),
+            const SizedBox(height: 18),
             Wrap(
               spacing: metricSpacing,
               runSpacing: metricSpacing,
               children: [
+                SizedBox(
+                  width: metricCardWidth,
+                  child: _MetricCard(
+                    icon: Icons.emergency_outlined,
+                    toneColor: _managerCritical,
+                    toneBackground: _managerCriticalSoft,
+                    label: 'ACTIVE INCIDENTS',
+                    value: data.metrics.activeIncidents.toString(),
+                    note: data.metrics.activeIncidents == 0
+                        ? 'No unresolved incidents'
+                        : 'Immediate follow-up required',
+                  ),
+                ),
                 SizedBox(
                   width: metricCardWidth,
                   child: _MetricCard(
@@ -108,12 +144,134 @@ class _DashboardOverview extends StatelessWidget {
             _LiveExceptionFeedCard(
               items: data.exceptionFeed,
               unitLabel: data.activeShift.unitLabel,
+              pendingIncidentIds: pendingIncidentIds,
+              onAcknowledgeIncident: onAcknowledgeIncident,
+              onResolveIncident: onResolveIncident,
+            ),
+            const SizedBox(height: 18),
+            _LiveActivityFeedCard(
+              items: data.activityFeed,
+              unitLabel: data.activeShift.unitLabel,
             ),
             const SizedBox(height: 18),
             _ComplianceCard(points: data.complianceSeries),
           ],
         );
       },
+    );
+  }
+}
+
+class _DashboardEmptyState extends StatelessWidget {
+  const _DashboardEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _managerPanel,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _managerBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            'No active shifts available yet.',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          ),
+          SizedBox(height: 10),
+          Text(
+            'Start an active shift for a unit to unlock the manager overview, incident feed, and live compliance signals.',
+            style: TextStyle(color: _managerMuted, height: 1.55),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardShiftScopeCard extends StatelessWidget {
+  const _DashboardShiftScopeCard({
+    required this.activeShifts,
+    required this.selectedShiftId,
+    required this.activeShift,
+    required this.onShiftSelected,
+  });
+
+  final List<ManagerShiftSummary> activeShifts;
+  final String selectedShiftId;
+  final ManagerShiftSummary activeShift;
+  final ValueChanged<String> onShiftSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _managerPanel,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _managerBorder),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 16,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 260, maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Active Shift Scope',
+                  style: TextStyle(
+                    color: _managerMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.9,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  activeShift.name,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${activeShift.unitLabel} • Floor ${activeShift.floorNumber}',
+                  style: const TextStyle(color: _managerMuted, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          if (activeShifts.length > 1)
+            SizedBox(
+              width: 280,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('dashboard-shift-selector-$selectedShiftId'),
+                initialValue: selectedShiftId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Dashboard Shift'),
+                items: activeShifts
+                    .map(
+                      (shift) => DropdownMenuItem(
+                        value: shift.id,
+                        child: Text('${shift.unitLabel} • ${shift.name}'),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: (value) {
+                  if (value != null) {
+                    onShiftSelected(value);
+                  }
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -200,10 +358,19 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _LiveExceptionFeedCard extends StatelessWidget {
-  const _LiveExceptionFeedCard({required this.items, required this.unitLabel});
+  const _LiveExceptionFeedCard({
+    required this.items,
+    required this.unitLabel,
+    required this.pendingIncidentIds,
+    required this.onAcknowledgeIncident,
+    required this.onResolveIncident,
+  });
 
   final List<ManagerExceptionFeedItem> items;
   final String unitLabel;
+  final Set<String> pendingIncidentIds;
+  final Future<void> Function(String incidentId) onAcknowledgeIncident;
+  final Future<void> Function(String incidentId) onResolveIncident;
 
   @override
   Widget build(BuildContext context) {
@@ -239,7 +406,7 @@ class _LiveExceptionFeedCard extends StatelessWidget {
                 border: Border.all(color: _managerBorder),
               ),
               child: Text(
-                'No active exceptions in $unitLabel right now. The feed will populate as tasks become overdue, escalated, or due soon.',
+                'No active exceptions in $unitLabel right now. The feed will populate as incidents, overdue tasks, escalations, or due-soon tasks appear.',
                 style: const TextStyle(color: _managerMuted, height: 1.55),
               ),
             )
@@ -247,7 +414,68 @@ class _LiveExceptionFeedCard extends StatelessWidget {
             Column(
               children: [
                 for (final item in items) ...[
-                  _ExceptionFeedRow(item: item),
+                  _ExceptionFeedRow(
+                    key: ValueKey('exception-row-${item.id}'),
+                    item: item,
+                    isActionPending: pendingIncidentIds.contains(item.id),
+                    onAcknowledgeIncident: onAcknowledgeIncident,
+                    onResolveIncident: onResolveIncident,
+                  ),
+                  if (item != items.last) const SizedBox(height: 10),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LiveActivityFeedCard extends StatelessWidget {
+  const _LiveActivityFeedCard({required this.items, required this.unitLabel});
+
+  final List<ManagerActivityFeedItem> items;
+  final String unitLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _managerPanel,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _managerBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Live Activity Feed',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 10),
+          if (items.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7FAFD),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: _managerBorder),
+              ),
+              child: Text(
+                'No recent notes, task updates, or incident actions in $unitLabel yet. This feed refreshes automatically so managers can follow care activity as it happens.',
+                style: const TextStyle(color: _managerMuted, height: 1.55),
+              ),
+            )
+          else
+            Column(
+              children: [
+                for (final item in items) ...[
+                  _ActivityFeedRow(
+                    key: ValueKey('activity-row-${item.id}'),
+                    item: item,
+                  ),
                   if (item != items.last) const SizedBox(height: 10),
                 ],
               ],
@@ -259,13 +487,24 @@ class _LiveExceptionFeedCard extends StatelessWidget {
 }
 
 class _ExceptionFeedRow extends StatelessWidget {
-  const _ExceptionFeedRow({required this.item});
+  const _ExceptionFeedRow({
+    super.key,
+    required this.item,
+    required this.isActionPending,
+    required this.onAcknowledgeIncident,
+    required this.onResolveIncident,
+  });
 
   final ManagerExceptionFeedItem item;
+  final bool isActionPending;
+  final Future<void> Function(String incidentId) onAcknowledgeIncident;
+  final Future<void> Function(String incidentId) onResolveIncident;
 
   @override
   Widget build(BuildContext context) {
     final tone = _exceptionToneFor(item.badgeTone);
+    final kindTone = _feedKindToneFor(item.kind);
+    final timeLabel = _formatTimeOfDay(item.occurredAt ?? item.dueAt);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -291,9 +530,25 @@ class _ExceptionFeedRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  item.title,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      timeLabel,
+                      style: const TextStyle(
+                        color: _managerMuted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -302,51 +557,235 @@ class _ExceptionFeedRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '“${item.description}”',
+                  item.description,
                   style: const TextStyle(
                     color: _managerInk,
                     fontSize: 13,
                     height: 1.5,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _FeedBadge(
+                      label: item.kind == ManagerExceptionKind.incident
+                          ? 'INCIDENT'
+                          : 'TASK',
+                      foreground: kindTone.foreground,
+                      background: kindTone.background,
+                    ),
+                    _FeedBadge(
+                      label: item.badge,
+                      foreground: tone.foreground,
+                      background: tone.background,
+                    ),
+                    _FeedBadge(
+                      label: item.status.label.toUpperCase(),
+                      foreground: _managerMuted,
+                      background: const Color(0xFFF0F4F8),
+                    ),
+                    if (item.isIncident && item.severity != null)
+                      _FeedBadge(
+                        label: item.severity!.label.toUpperCase(),
+                        foreground: item.severity == ManagerIncidentSeverity.red
+                            ? _managerCritical
+                            : _managerWarning,
+                        background: item.severity == ManagerIncidentSeverity.red
+                            ? _managerCriticalSoft
+                            : _managerWarningSoft,
+                      ),
+                  ],
+                ),
+                if (item.isIncident &&
+                    (item.canAcknowledge || item.canResolve)) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      if (item.canAcknowledge)
+                        OutlinedButton(
+                          onPressed: isActionPending
+                              ? null
+                              : () => onAcknowledgeIncident(item.id),
+                          child: isActionPending
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Acknowledge'),
+                        ),
+                      if (item.canResolve)
+                        FilledButton.tonal(
+                          onPressed: isActionPending
+                              ? null
+                              : () => onResolveIncident(item.id),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: _managerPrimary,
+                            backgroundColor: _managerPrimarySoft,
+                          ),
+                          child: isActionPending
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Resolve'),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityFeedRow extends StatelessWidget {
+  const _ActivityFeedRow({super.key, required this.item});
+
+  final ManagerActivityFeedItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = _exceptionToneFor(item.badgeTone);
+    final kindTone = _activityKindToneFor(item.kind);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7FAFD),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _managerBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: tone.background,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(tone.icon, size: 18, color: tone.foreground),
+          ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _formatTimeOfDay(item.dueAt),
-                style: const TextStyle(
-                  color: _managerMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _formatTimeOfDay(item.occurredAt),
+                      style: const TextStyle(
+                        color: _managerMuted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+                const SizedBox(height: 4),
+                Text(
+                  '${item.residentName} • ${item.roomLabel}',
+                  style: const TextStyle(color: _managerMuted, fontSize: 12),
                 ),
-                decoration: BoxDecoration(
-                  color: tone.background,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  item.badge,
-                  style: TextStyle(
-                    color: tone.foreground,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
+                const SizedBox(height: 10),
+                Text(
+                  item.description,
+                  style: const TextStyle(
+                    color: _managerInk,
+                    fontSize: 13,
+                    height: 1.5,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _FeedBadge(
+                      label: switch (item.kind) {
+                        ManagerActivityKind.note => 'NOTE',
+                        ManagerActivityKind.task => 'TASK',
+                        ManagerActivityKind.incident => 'INCIDENT',
+                      },
+                      foreground: kindTone.foreground,
+                      background: kindTone.background,
+                    ),
+                    _FeedBadge(
+                      label: item.badge,
+                      foreground: tone.foreground,
+                      background: tone.background,
+                    ),
+                    Text(
+                      'Updated by ${item.actorName}',
+                      style: const TextStyle(
+                        color: _managerMuted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FeedBadge extends StatelessWidget {
+  const _FeedBadge({
+    required this.label,
+    required this.foreground,
+    required this.background,
+  });
+
+  final String label;
+  final Color foreground;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
@@ -548,19 +987,65 @@ class _ExceptionTone {
   final IconData icon;
 }
 
+_ExceptionTone _feedKindToneFor(ManagerExceptionKind kind) {
+  switch (kind) {
+    case ManagerExceptionKind.incident:
+      return const _ExceptionTone(
+        foreground: _managerPrimary,
+        background: _managerPrimarySoft,
+        icon: Icons.emergency_outlined,
+      );
+    case ManagerExceptionKind.task:
+      return const _ExceptionTone(
+        foreground: _managerInfo,
+        background: _managerInfoSoft,
+        icon: Icons.checklist_rounded,
+      );
+  }
+}
+
+_ExceptionTone _activityKindToneFor(ManagerActivityKind kind) {
+  switch (kind) {
+    case ManagerActivityKind.note:
+      return const _ExceptionTone(
+        foreground: _managerInfo,
+        background: _managerInfoSoft,
+        icon: Icons.sticky_note_2_outlined,
+      );
+    case ManagerActivityKind.task:
+      return const _ExceptionTone(
+        foreground: _managerSuccess,
+        background: _managerSuccessSoft,
+        icon: Icons.task_alt_rounded,
+      );
+    case ManagerActivityKind.incident:
+      return const _ExceptionTone(
+        foreground: _managerWarning,
+        background: _managerWarningSoft,
+        icon: Icons.health_and_safety_outlined,
+      );
+  }
+}
+
 _ExceptionTone _exceptionToneFor(String tone) {
   switch (tone) {
     case 'critical':
       return const _ExceptionTone(
         foreground: _managerCritical,
         background: _managerCriticalSoft,
-        icon: Icons.close_rounded,
+        icon: Icons.warning_amber_rounded,
       );
     case 'warning':
       return const _ExceptionTone(
         foreground: _managerWarning,
         background: _managerWarningSoft,
-        icon: Icons.arrow_outward_rounded,
+        icon: Icons.priority_high_rounded,
+      );
+    case 'success':
+      return const _ExceptionTone(
+        foreground: _managerSuccess,
+        background: _managerSuccessSoft,
+        icon: Icons.check_circle_outline_rounded,
       );
     case 'info':
     default:

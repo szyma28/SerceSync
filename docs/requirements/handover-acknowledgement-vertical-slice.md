@@ -96,7 +96,7 @@ This keeps demonstrations repeatable and supports deterministic evaluation.
 
 ### Mobile app changes
 
-The mobile app is no longer just a placeholder screen for this slice. It now provides:
+The mobile app now provides:
 
 - login form
 - configurable API base URL

@@ -1,6 +1,5 @@
 import 'user.dart';
-
-DateTime _parseApiDateTime(String value) => DateTime.parse(value).toLocal();
+import 'shared_models.dart';
 
 class HandoverSnapshot {
   const HandoverSnapshot({
@@ -23,7 +22,7 @@ class HandoverSnapshot {
       acknowledged: json['acknowledged'] as bool,
       acknowledgedAt: json['acknowledgedAt'] == null
           ? null
-          : _parseApiDateTime(json['acknowledgedAt'] as String),
+          : parseApiDateTime(json['acknowledgedAt'] as String),
     );
   }
 
@@ -34,36 +33,28 @@ class HandoverSnapshot {
   final DateTime? acknowledgedAt;
 }
 
-class ShiftSummary {
+class ShiftSummary extends ShiftPeriod {
   const ShiftSummary({
-    required this.id,
-    required this.name,
-    required this.startsAt,
-    required this.endsAt,
-    required this.status,
-    required this.floorNumber,
-    required this.unitLabel,
+    required super.id,
+    required super.name,
+    required super.startsAt,
+    required super.endsAt,
+    required super.status,
+    required super.floorNumber,
+    required super.unitLabel,
   });
 
   factory ShiftSummary.fromJson(Map<String, dynamic> json) {
     return ShiftSummary(
       id: json['id'] as String,
       name: json['name'] as String,
-      startsAt: _parseApiDateTime(json['startsAt'] as String),
-      endsAt: _parseApiDateTime(json['endsAt'] as String),
-      status: json['status'] as String,
+      startsAt: parseApiDateTime(json['startsAt'] as String),
+      endsAt: parseApiDateTime(json['endsAt'] as String),
+      status: ShiftStatusX.fromApiValue(json['status'] as String),
       floorNumber: json['floorNumber'] as int? ?? 1,
       unitLabel: json['unitLabel'] as String? ?? 'Willow Floor',
     );
   }
-
-  final String id;
-  final String name;
-  final DateTime startsAt;
-  final DateTime endsAt;
-  final String status;
-  final int floorNumber;
-  final String unitLabel;
 }
 
 class HandoverSummary {
@@ -78,8 +69,8 @@ class HandoverSummary {
     return HandoverSummary(
       id: json['id'] as String,
       summary: json['summary'] as String,
-      createdAt: _parseApiDateTime(json['createdAt'] as String),
-      updatedAt: _parseApiDateTime(json['updatedAt'] as String),
+      createdAt: parseApiDateTime(json['createdAt'] as String),
+      updatedAt: parseApiDateTime(json['updatedAt'] as String),
     );
   }
 
