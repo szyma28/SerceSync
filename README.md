@@ -27,7 +27,7 @@ The main workflow SerceSync is designed around is:
 
 ## Delivery methodology
 
-The implementation is being delivered as a series of small vertical slices.
+Implementation is delivered in vertical slices.
 
 Each slice should:
 - solve one meaningful workflow end to end
@@ -118,7 +118,7 @@ Recommended baseline versions:
 
 ## Getting started
 
-This repository contains the current dissertation prototype together with the slice notes used to document delivery decisions and traceable progress.
+This repository contains the dissertation prototype and the slice notes used for traceability.
 
 ### 1. Enter the project
 
@@ -168,13 +168,13 @@ pnpm run db:migrate
 
 This applies the Prisma migrations and initializes the backend schema.
 
-### 5. Seed the current demo data
+### 5. Seed demo data
 
 ```bash
 pnpm run db:seed
 ```
 
-The seed currently creates demo users, an active shift, a handover, live tasks, and resident records so the implemented mobile and web slices can be demonstrated locally.
+The seed creates demo users, an active shift, a handover, live tasks, and resident records so the implemented mobile and web slices can be demonstrated locally.
 
 ### 6. Reset the demo back to the standard baseline
 
@@ -187,7 +187,7 @@ pnpm run db:reset-demo
 
 This clears the local demo workflow data that changes during use and recreates the standard baseline, including:
 - the active carer shift
-- the current handover
+- the handover
 - the four live priority tasks used in the mobile workflow
 - the seeded resident directory used by both mobile and manager web
 
@@ -198,7 +198,7 @@ A project-level `.env.example` file defines the minimum required local environme
 
 No real resident-identifiable data should be used in development, testing, or demonstration. Synthetic data only.
 
-### Current environment variables
+### Environment variables
 
 | Variable | Purpose |
 | --- | --- |
@@ -213,7 +213,7 @@ No real resident-identifiable data should be used in development, testing, or de
 
 
 
-## Current run commands
+## Run commands
 
 ### Mobile app
 
@@ -222,9 +222,9 @@ cd apps/mobile
 flutter run
 ```
 
-The mobile app now includes multiple connected workflow slices:
+The mobile app supports:
 - login with seeded demo credentials
-- current handover display
+- handover display
 - handover acknowledgement
 - post-handover workspace navigation across Priorities, Residents, and My Shift
 - live priority completion from the resident detail screen
@@ -257,7 +257,7 @@ cd apps/api
 pnpm run start:dev
 ```
 
-The API now supports the currently delivered slices with:
+The API supports the delivered slices with:
 - `POST /auth/login`
 - `GET /shifts/current`
 - `GET /shifts/my`
@@ -288,9 +288,9 @@ pnpm run db:reset-demo
 pnpm run db:status
 ```
 
-### Current schema foundation
+### Schema foundation
 
-The current Prisma schema includes:
+The Prisma schema includes:
 
 - `Role`
 - `User`

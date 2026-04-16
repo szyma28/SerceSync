@@ -4,7 +4,7 @@
 
 This document records the first substantial mobile implementation slice for SerceSync in the same traceability format as the earlier requirement notes.
 
-Unlike the earlier backend-first work, this slice brings the project into a more realistic product form. It connects the previously established handover and task-accountability contracts to a working Flutter client and reframes the post-handover mobile experience as a real shift workspace rather than a placeholder task shell.
+This slice brings the project into a more realistic product form. It connects the handover and task-accountability contracts to a working Flutter client and frames the post-handover mobile experience as a shift workspace rather than a placeholder task shell.
 
 This note is intended to support:
 
@@ -48,7 +48,7 @@ The earlier SerceSync slices established two backend truths:
 
 Those slices created the workflow rules, but they did not yet create a believable mobile product experience. The project therefore reached an important transition point: continuing to add backend features without improving the mobile information architecture would make the prototype technically richer but experientially weaker.
 
-This slice was implemented next because it closes that gap.
+This slice closes that gap.
 
 It gives the dissertation a stronger evaluation surface by showing:
 
@@ -71,7 +71,7 @@ That note described the second slice, where the task workflow contract was stabi
 
 ### `mobile-workspace-ia-pivot.md`
 
-That note explains the product direction of the mobile IA pivot. The current slice document goes further by describing the implemented mobile foundation, the interface behaviour, the supporting files, and the dissertation significance of the work.
+That note explains the product direction of the mobile IA pivot. This note goes further by describing the implemented mobile foundation, the interface behaviour, the supporting files, and the dissertation significance of the work.
 
 ## Methodology alignment
 
@@ -126,7 +126,7 @@ That documentation is part of the slice, not an afterthought.
 
 ### Mobile application foundation
 
-The Flutter app has been moved beyond the single-screen placeholder stage and restructured into a more maintainable client application.
+The Flutter app now has a dedicated client structure beyond the single-screen placeholder stage.
 
 The mobile layer now includes:
 
@@ -166,7 +166,7 @@ The key behavioural change in this slice is what happens after acknowledgement: 
 
 ### Shift workspace shell
 
-This slice introduces a new workspace shell that becomes the main post-handover home for the mobile app.
+This slice introduces the post-handover workspace shell for the mobile app.
 
 The shell provides a bottom navigation bar with three real destinations:
 
@@ -174,7 +174,7 @@ The shell provides a bottom navigation bar with three real destinations:
 - `Residents`
 - `My Shift`
 
-This replaces the earlier placeholder module framing and ensures that each navigation destination is meaningful, reachable, and coherent with the care workflow.
+This defines three meaningful, reachable navigation destinations that align with the care workflow.
 
 ### `Priorities`
 
@@ -309,7 +309,7 @@ This keeps the slice safer because the API contract remains stable while the mob
 
 The resident list and resident detail views are implemented as a first-pass interface.
 
-That means the current slice focuses on:
+That means this slice focuses on:
 
 - navigation clarity
 - resident recognition
@@ -394,7 +394,6 @@ This work matters because it improves consistency across the slice and reduces U
 - `docs/requirements/handover-acknowledgement-vertical-slice.md`
 - `docs/requirements/task-accountability-backend-slice.md`
 - `docs/requirements/mobile-workspace-ia-pivot.md`
-- `docs/requirements/mobile-shift-workspace-vertical-slice.md`
 - `docs/README.md`
 
 ### Local development support

@@ -12,6 +12,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import { CreateResidentIncidentDto } from './dto/create-resident-incident.dto';
 import { CreateResidentTimelineEntryDto } from './dto/create-resident-timeline-entry.dto';
 import { ResidentsService } from './residents.service';
 
@@ -57,6 +58,34 @@ export class ResidentsController {
       residentId,
       user,
       createResidentTimelineEntryDto,
+      evidenceFile,
+    );
+  }
+
+  @Post(':id/incidents')
+  @UseInterceptors(
+    FileInterceptor('evidence', {
+      limits: {
+        fileSize: 6 * 1024 * 1024,
+      },
+    }),
+  )
+  createResidentIncident(
+    @Param('id') residentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() createResidentIncidentDto: CreateResidentIncidentDto,
+    @UploadedFile()
+    evidenceFile?: {
+      buffer: Buffer;
+      originalname: string;
+      mimetype: string;
+      size: number;
+    },
+  ) {
+    return this.residentsService.createResidentIncident(
+      residentId,
+      user,
+      createResidentIncidentDto,
       evidenceFile,
     );
   }

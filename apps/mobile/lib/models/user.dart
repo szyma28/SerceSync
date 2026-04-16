@@ -1,3 +1,5 @@
+import 'shared_models.dart';
+
 class LoginUser {
   const LoginUser({
     required this.id,
@@ -11,14 +13,14 @@ class LoginUser {
       id: json['id'] as String,
       email: json['email'] as String,
       displayName: json['displayName'] as String,
-      role: json['role'] as String,
+      role: AppUserRoleX.fromApiValue(json['role'] as String),
     );
   }
 
   final String id;
   final String email;
   final String displayName;
-  final String role;
+  final AppUserRole role;
 }
 
 class LoginResponse {

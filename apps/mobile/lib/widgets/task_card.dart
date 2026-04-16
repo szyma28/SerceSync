@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/task.dart';
 import '../theme/app_theme.dart';
+import 'date_time_formatters.dart';
 import 'status_chip.dart';
 
 class TaskCard extends StatelessWidget {
@@ -44,8 +45,7 @@ class TaskCard extends StatelessWidget {
           width: 1.5,
         ),
       ),
-      clipBehavior:
-          Clip.antiAlias, // To clip the inkwell and potential watermark
+      clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
           if (_isMeds)
@@ -70,7 +70,6 @@ class TaskCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Status icon or indicator
                   Container(
                     width: 48,
                     height: 48,
@@ -90,7 +89,6 @@ class TaskCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 16),
 
-                  // Task details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,7 +106,7 @@ class TaskCard extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '${task.dueAt!.hour.toString().padLeft(2, '0')}:${task.dueAt!.minute.toString().padLeft(2, '0')}',
+                                    formatHourMinute(task.dueAt!),
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium

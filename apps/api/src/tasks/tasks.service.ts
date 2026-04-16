@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import type { AuditEventKind, TaskStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
+import { type AuditEventDetails } from '../audit-event-details';
+import {
+  ManagerDashboardStreamService,
+  type ManagerDashboardUpdateReason,
+} from '../manager-dashboard-stream/manager-dashboard-stream.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteTaskDto } from './dto/complete-task.dto';
 import { TaskReasonDto } from './dto/task-reason.dto';
@@ -19,7 +24,10 @@ const taskStatusSortOrder: Record<TaskStatus, number> = {
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly managerDashboardStream: ManagerDashboardStreamService,
+  ) {}
 
   private sanitizeNote(value: string | undefined) {
     const trimmed = value?.trim();
@@ -75,7 +83,7 @@ export class TasksService {
     statusUpdatedAt: Date | null;
     assignedUserId: string | null;
     residentId: string | null;
-    resident?: {
+    resident: {
       fullName: string;
       roomLabel: string;
     } | null;
@@ -158,12 +166,31 @@ export class TasksService {
             fromStatus: task.status,
             toStatus: nextStatus,
             note,
-          },
+          } satisfies AuditEventDetails,
         },
       });
 
       return taskRecord;
     });
+
+    let updateReason: ManagerDashboardUpdateReason | null = null;
+    switch (nextStatus) {
+      case 'COMPLETED':
+        updateReason = 'task-completed';
+        break;
+      case 'DEFERRED':
+        updateReason = 'task-deferred';
+        break;
+      case 'ESCALATED':
+        updateReason = 'task-escalated';
+        break;
+      default:
+        break;
+    }
+
+    if (updateReason) {
+      this.managerDashboardStream.publishShiftUpdate(shift.id, updateReason);
+    }
 
     return {
       task: this.toTaskSummary(updatedTask),

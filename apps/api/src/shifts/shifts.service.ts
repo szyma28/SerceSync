@@ -1,26 +1,27 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { ShiftStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+type ShiftSummaryInput = {
+  id: string;
+  name: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: ShiftStatus;
+  floorNumber: number;
+  unitLabel: string;
+  handover: {
+    acknowledgements: Array<{
+      acknowledgedAt: Date;
+    }>;
+  } | null;
+};
 
 @Injectable()
 export class ShiftsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private toShiftSummary(
-    shift: {
-      id: string;
-      name: string;
-      startsAt: Date;
-      endsAt: Date;
-      status: string;
-      floorNumber: number;
-      unitLabel: string;
-      handover?: {
-        acknowledgements: Array<{
-          acknowledgedAt: Date;
-        }>;
-      } | null;
-    },
-  ) {
+  private toShiftSummary(shift: ShiftSummaryInput) {
     const acknowledgement = shift.handover?.acknowledgements[0] ?? null;
 
     return {
@@ -43,6 +44,20 @@ export class ShiftsService {
         assignedUsers: {
           some: {
             id: userId,
+          },
+        },
+      },
+      include: {
+        handover: {
+          include: {
+            acknowledgements: {
+              where: {
+                acknowledgedById: userId,
+              },
+              select: {
+                acknowledgedAt: true,
+              },
+            },
           },
         },
       },

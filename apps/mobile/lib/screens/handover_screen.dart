@@ -3,6 +3,8 @@ import '../api/api_client.dart';
 import '../models/handover.dart';
 import '../models/user.dart';
 import '../theme/app_theme.dart';
+import '../widgets/date_time_formatters.dart';
+import '../widgets/screen_message_state.dart';
 import 'shift_workspace_screen.dart';
 
 class HandoverScreen extends StatefulWidget {
@@ -45,10 +47,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
       setState(() => _snapshot = snapshot);
     } on ApiException catch (e) {
       if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Failed to load handover details.');
-      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -67,10 +65,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
       if (mounted) setState(() => _snapshot = snapshot);
     } on ApiException catch (e) {
       if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Failed to acknowledge handover.');
-      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -106,7 +100,9 @@ class _HandoverScreenState extends State<HandoverScreen> {
         ),
         body: SafeArea(
           child: _isLoading && _snapshot == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primaryBlue),
+                )
               : _buildContent(),
         ),
       ),
@@ -115,36 +111,16 @@ class _HandoverScreenState extends State<HandoverScreen> {
 
   Widget _buildContent() {
     if (_errorMessage != null && _snapshot == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Image.asset('assets/images/NoConnection.png', height: 200),
-              const SizedBox(height: 32),
-              Text(
-                'Something went wrong',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
-              ),
-              const SizedBox(height: 32),
-              FilledButton.icon(
-                onPressed: _fetchHandover,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try Again'),
-              ),
-            ],
-          ),
-        ),
+      return ScreenMessageState(
+        imageAssetPath: 'assets/images/NoConnection.png',
+        imageHeight: 200,
+        title: 'Something went wrong',
+        message: _errorMessage!,
+        messageStyle: Theme.of(
+          context,
+        ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
+        actionLabel: 'Try Again',
+        onAction: _fetchHandover,
       );
     }
 
@@ -152,7 +128,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
     final isAcknowledged = snap.acknowledged;
 
     if (isAcknowledged) {
-      // Success State
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -200,7 +175,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
       );
     }
 
-    // Pending Ritual State
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -247,7 +221,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
               ),
               const SizedBox(height: 40),
 
-              // Dossier Ticket
               Container(
                 decoration: BoxDecoration(
                   color: AppTheme.surfaceCard,
@@ -291,7 +264,11 @@ class _HandoverScreenState extends State<HandoverScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '${snap.shift.startsAt.hour}:${snap.shift.startsAt.minute.toString().padLeft(2, '0')} — ${snap.shift.endsAt.hour}:${snap.shift.endsAt.minute.toString().padLeft(2, '0')}',
+                                  formatHourMinuteRange(
+                                    snap.shift.startsAt,
+                                    snap.shift.endsAt,
+                                    separator: ' — ',
+                                  ),
                                   style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(
                                         color: AppTheme.textPrimary,
@@ -367,7 +344,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
           ),
         ),
 
-        // Deeply shadowed bottom action
         Container(
           padding: const EdgeInsets.fromLTRB(28, 20, 28, 36),
           decoration: BoxDecoration(

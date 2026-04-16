@@ -46,9 +46,6 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Unable to sign in right now.');
     } finally {
       if (mounted) {
         setState(() => _isBusy = false);

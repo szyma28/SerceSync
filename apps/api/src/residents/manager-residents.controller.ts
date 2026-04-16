@@ -27,7 +27,9 @@ export class ManagerResidentsController {
 
   @Post()
   createResident(@Body() createManagerResidentDto: CreateManagerResidentDto) {
-    return this.residentsService.createManagerResident(createManagerResidentDto);
+    return this.residentsService.createManagerResident(
+      createManagerResidentDto,
+    );
   }
 
   @Patch(':id')

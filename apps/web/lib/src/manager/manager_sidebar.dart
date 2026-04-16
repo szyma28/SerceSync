@@ -73,8 +73,8 @@ class _ManagerSidebar extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text(
-                        'Unit Administrator',
+                      Text(
+                        user.role.label,
                         style: TextStyle(color: _managerMuted, fontSize: 11),
                       ),
                     ],

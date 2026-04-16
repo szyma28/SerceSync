@@ -4,7 +4,7 @@
 
 This document records the next substantial SerceSync vertical slice in the same dissertation-traceability format as the earlier requirement notes.
 
-The slice moves the project from a largely seeded and placeholder-driven resident workflow into a more credible operational prototype by implementing three linked capabilities:
+The slice moves the project from a seeded resident workflow into a more credible operational prototype by implementing three linked capabilities:
 
 1. manager-created and manager-editable residents on top of the shared seeded model
 2. real resident timeline photo evidence upload instead of a placeholder-only flow
@@ -75,11 +75,11 @@ This slice extends the work recorded in the previous documents rather than repla
 
 ### `handover-acknowledgement-vertical-slice.md`
 
-That slice established the safe shift-start pattern and audit-backed acknowledgement. The current slice builds on that by enriching what happens after handover: resident management, resident documentation, and live shift awareness.
+That slice established the safe shift-start pattern and audit-backed acknowledgement. This slice builds on that by enriching what happens after handover: resident management, resident documentation, and live shift awareness.
 
 ### `task-accountability-backend-slice.md`
 
-That slice stabilised the backend contract for post-handover task state and accountability. The current slice does not replace that logic. Instead, it extends the operational model around it by:
+That slice stabilised the backend contract for post-handover task state and accountability. This slice does not replace that logic. Instead, it extends the operational model around it by:
 
 - giving managers direct control over resident records
 - making resident timeline documentation richer
@@ -94,7 +94,7 @@ That note explained why the mobile app was moving toward `Priorities`, `Resident
 
 ### `mobile-shift-workspace-vertical-slice.md`
 
-That slice created the mobile workspace shell and first-pass resident flows. The current slice hardens those foundations by replacing two notable placeholders:
+That slice created the mobile workspace shell and first-pass resident flows. This slice hardens those foundations by replacing two notable placeholders:
 
 - placeholder resident evidence flow
 - placeholder `My Shift` rota assumptions

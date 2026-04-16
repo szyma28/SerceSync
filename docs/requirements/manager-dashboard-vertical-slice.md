@@ -16,12 +16,13 @@ The slice is intended to support:
 This slice delivers the first believable manager landing dashboard in the Flutter web application:
 
 1. a manager signs in to the web workspace
-2. the client requests `/manager/dashboard`
-3. the backend resolves the active shift that should drive the overview
-4. the backend derives dashboard metrics from task state, assigned users, and handover acknowledgements
-5. the backend returns an exception feed and compliance trend series
-6. the web workspace renders a `Unit Overview` dashboard with summary cards, live exception visibility, and a compliance chart
-7. the manager keeps the same workspace shell and sidebar while moving between dashboard and residents
+2. the client requests the active shift options and selects a shift context
+3. the client requests `/manager/dashboard?shiftId=...`
+4. the backend resolves the selected active shift that should drive the overview
+5. the backend derives dashboard metrics from task state, assigned users, and handover acknowledgements
+6. the backend returns an exception feed and compliance trend series scoped to that unit
+7. the web workspace renders a `Unit Overview` dashboard with summary cards, live exception visibility, a compliance chart, and a shift selector when more than one active shift exists
+8. the manager keeps the same workspace shell and sidebar while moving between dashboard and residents
 
 The slice spans:
 
@@ -88,6 +89,7 @@ This was implemented as a true slice across backend and web rather than as isola
 The manager dashboard is not assembled from arbitrary client-side demo values. The server remains authoritative for:
 
 - the active shift used for the dashboard
+- the selected shift scope used for the dashboard
 - overdue and escalated task counts
 - unread handover count
 - the contents and ordering of the exception feed
@@ -122,7 +124,8 @@ This slice strengthens traceability between problem framing and implementation:
 
 The backend now exposes a manager-only dashboard route:
 
-- `GET /manager/dashboard`
+- `GET /manager/dashboard/shifts`
+- `GET /manager/dashboard?shiftId=...`
 
 The route is protected by:
 
@@ -134,18 +137,19 @@ This keeps management visibility behind authenticated and role-aware server cont
 
 ### Dashboard derivation logic
 
-The manager dashboard snapshot is derived from the active shift rather than hand-built static demo values.
+The manager dashboard snapshot is derived from the selected active shift rather than hand-built static demo values.
 
 Implemented backend behavior includes:
 
-- resolving the active shift for dashboard use
-- failing clearly when no active shift exists
+- listing active shifts for manager selection
+- resolving the selected active shift for dashboard use
+- failing clearly when no active shift exists or no shift is selected
 - classifying active-shift tasks into dashboard-relevant statuses
 - counting overdue tasks
 - counting escalated items
 - deriving unread handovers from assigned users minus acknowledgements
 - estimating shift completion percentage from elapsed shift time
-- generating a prioritized exception feed
+- generating a prioritized exception feed scoped to the selected unit
 - generating a compliance trend series for the chart
 
 ### Web manager dashboard client flow
@@ -154,8 +158,10 @@ The web manager workspace now includes a dedicated dashboard data path.
 
 Implemented web behavior includes:
 
+- authenticated `getActiveShifts` API client support
 - authenticated `getDashboard` API client support
 - typed `ManagerDashboardSnapshot` parsing
+- in-session selected shift state
 - dashboard loading and error state management in the workspace screen
 - refresh support for the currently selected tab
 - manager landing title of `Unit Overview`
@@ -164,7 +170,7 @@ Implemented web behavior includes:
 
 The manager overview screen now renders:
 
-- four top-level metric cards
+- five top-level metric cards
 - a live exception feed card
 - a compliance trend chart
 
@@ -194,7 +200,7 @@ Implemented layout behavior includes:
 
 ### Manager overview is shift-centric
 
-The dashboard is intentionally anchored to the active shift rather than attempting to summarize all historical unit activity. This keeps the view focused on what matters operationally right now.
+The dashboard is intentionally anchored to a manager-selected active shift rather than attempting to summarize all historical unit activity. This keeps the view focused on what matters operationally right now while remaining safe when multiple units have active shifts at the same time.
 
 ### Exception feed is prioritized, not exhaustive
 
@@ -249,7 +255,7 @@ This slice is meaningful but still intentionally bounded.
 
 Current limitations include:
 
-- dashboard visibility depends on an active shift being present
+- dashboard visibility depends on at least one active shift being present
 - the compliance chart is a derived overview, not a historical reporting module
 - the exception feed is intentionally short and not a full manager work queue
 - `Staff & Shifts`, `Compliance Reports`, and `Demo Console` remain placeholder lanes in the current shell

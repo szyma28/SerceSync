@@ -6,6 +6,7 @@ import '../models/workspace_models.dart';
 import '../screens/resident_detail_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/priority_card.dart';
+import '../widgets/screen_message_state.dart';
 
 class PrioritiesScreen extends StatefulWidget {
   const PrioritiesScreen({
@@ -51,8 +52,6 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
       }
     } on ApiException catch (error) {
       if (mounted) setState(() => _errorMessage = error.message);
-    } catch (_) {
-      if (mounted) setState(() => _errorMessage = 'Failed to load priorities.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -126,9 +125,16 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
                 child: CircularProgressIndicator(color: AppTheme.primaryBlue),
               )
             : _errorMessage != null && _tasks.isEmpty
-            ? _PrioritiesErrorState(
+            ? ScreenMessageState(
+                imageAssetPath: 'assets/images/404error_transparent.png',
+                imageHeight: 200,
+                title: 'Couldn\'t load priorities',
+                titleStyle: Theme.of(
+                  context,
+                ).textTheme.headlineSmall?.copyWith(color: AppTheme.errorRed),
                 message: _errorMessage!,
-                onRetry: _fetchTasks,
+                onAction: _fetchTasks,
+                actionLabel: 'Try Again',
               )
             : RefreshIndicator(
                 onRefresh: _fetchTasks,
@@ -213,78 +219,6 @@ class _PriorityBandSection extends StatelessWidget {
             (item) => PriorityCard(item: item, onTap: () => onTap(item)),
           ),
       ],
-    );
-  }
-}
-
-class _PrioritiesErrorState extends StatelessWidget {
-  const _PrioritiesErrorState({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              height: 220,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  IgnorePointer(
-                    child: Container(
-                      width: 240,
-                      height: 170,
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          colors: [
-                            AppTheme.primaryBlueLight.withAlpha(120),
-                            AppTheme.primaryBlueLight.withAlpha(24),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.0, 0.6, 1.0],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Opacity(
-                    opacity: 0.96,
-                    child: Image.asset(
-                      'assets/images/404error_transparent.png',
-                      height: 200,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Couldn\'t load priorities',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(color: AppTheme.errorRed),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

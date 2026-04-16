@@ -1,6 +1,7 @@
+import 'shared_models.dart';
 import 'task.dart';
 
-DateTime _parseApiDateTime(String value) => DateTime.parse(value).toLocal();
+export 'shared_models.dart';
 
 enum PriorityBand { urgentNow, dueWithinHour, reminders }
 
@@ -13,6 +14,15 @@ enum ResidentEntryType {
   medicationNote,
   escalation,
 }
+
+const List<ResidentEntryType> residentEntryTypesForNewNotes = [
+  ResidentEntryType.personalCare,
+  ResidentEntryType.observation,
+  ResidentEntryType.nutritionHydration,
+  ResidentEntryType.mobilityRepositioning,
+  ResidentEntryType.medicationNote,
+  ResidentEntryType.escalation,
+];
 
 extension ResidentEntryTypeX on ResidentEntryType {
   String get apiValue {
@@ -74,6 +84,170 @@ extension ResidentEntryTypeX on ResidentEntryType {
   }
 }
 
+enum PersonalCareSubtype { shower, continence, footCare, skinCare }
+
+extension PersonalCareSubtypeX on PersonalCareSubtype {
+  String get apiValue {
+    switch (this) {
+      case PersonalCareSubtype.shower:
+        return 'SHOWER';
+      case PersonalCareSubtype.continence:
+        return 'CONTINENCE';
+      case PersonalCareSubtype.footCare:
+        return 'FOOT_CARE';
+      case PersonalCareSubtype.skinCare:
+        return 'SKIN_CARE';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PersonalCareSubtype.shower:
+        return 'Shower';
+      case PersonalCareSubtype.continence:
+        return 'Continence';
+      case PersonalCareSubtype.footCare:
+        return 'Foot care';
+      case PersonalCareSubtype.skinCare:
+        return 'Skin care';
+    }
+  }
+
+  static PersonalCareSubtype fromApiValue(String value) {
+    switch (value) {
+      case 'CONTINENCE':
+        return PersonalCareSubtype.continence;
+      case 'FOOT_CARE':
+        return PersonalCareSubtype.footCare;
+      case 'SKIN_CARE':
+        return PersonalCareSubtype.skinCare;
+      case 'SHOWER':
+      default:
+        return PersonalCareSubtype.shower;
+    }
+  }
+}
+
+enum IncidentSeverity { amber, red }
+
+extension IncidentSeverityX on IncidentSeverity {
+  String get apiValue {
+    switch (this) {
+      case IncidentSeverity.amber:
+        return 'AMBER';
+      case IncidentSeverity.red:
+        return 'RED';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case IncidentSeverity.amber:
+        return 'Amber';
+      case IncidentSeverity.red:
+        return 'Red';
+    }
+  }
+
+  static IncidentSeverity fromApiValue(String value) {
+    switch (value) {
+      case 'RED':
+        return IncidentSeverity.red;
+      case 'AMBER':
+      default:
+        return IncidentSeverity.amber;
+    }
+  }
+}
+
+enum IncidentStatus { open, acknowledged, resolved }
+
+extension IncidentStatusX on IncidentStatus {
+  String get apiValue {
+    switch (this) {
+      case IncidentStatus.open:
+        return 'OPEN';
+      case IncidentStatus.acknowledged:
+        return 'ACKNOWLEDGED';
+      case IncidentStatus.resolved:
+        return 'RESOLVED';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case IncidentStatus.open:
+        return 'Open';
+      case IncidentStatus.acknowledged:
+        return 'Acknowledged';
+      case IncidentStatus.resolved:
+        return 'Resolved';
+    }
+  }
+
+  static IncidentStatus fromApiValue(String value) {
+    switch (value) {
+      case 'ACKNOWLEDGED':
+        return IncidentStatus.acknowledged;
+      case 'RESOLVED':
+        return IncidentStatus.resolved;
+      case 'OPEN':
+      default:
+        return IncidentStatus.open;
+    }
+  }
+}
+
+enum IncidentCategory { fall, medication, behaviour, injury, other }
+
+extension IncidentCategoryX on IncidentCategory {
+  String get apiValue {
+    switch (this) {
+      case IncidentCategory.fall:
+        return 'FALL';
+      case IncidentCategory.medication:
+        return 'MEDICATION';
+      case IncidentCategory.behaviour:
+        return 'BEHAVIOUR';
+      case IncidentCategory.injury:
+        return 'INJURY';
+      case IncidentCategory.other:
+        return 'OTHER';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case IncidentCategory.fall:
+        return 'Fall';
+      case IncidentCategory.medication:
+        return 'Medication';
+      case IncidentCategory.behaviour:
+        return 'Behaviour';
+      case IncidentCategory.injury:
+        return 'Injury';
+      case IncidentCategory.other:
+        return 'Other';
+    }
+  }
+
+  static IncidentCategory fromApiValue(String value) {
+    switch (value) {
+      case 'MEDICATION':
+        return IncidentCategory.medication;
+      case 'BEHAVIOUR':
+        return IncidentCategory.behaviour;
+      case 'INJURY':
+        return IncidentCategory.injury;
+      case 'OTHER':
+        return IncidentCategory.other;
+      case 'FALL':
+      default:
+        return IncidentCategory.fall;
+    }
+  }
+}
+
 class PriorityItem {
   const PriorityItem({
     required this.id,
@@ -89,16 +263,16 @@ class PriorityItem {
   });
 
   factory PriorityItem.fromTask(ShiftTask task, DateTime now) {
-    final normalizedStatus = task.status.toLowerCase();
     final dueAt = task.dueAt;
 
-    if (normalizedStatus == 'overdue' || normalizedStatus == 'escalated') {
+    if (task.status == TaskStatus.overdue ||
+        task.status == TaskStatus.escalated) {
       return PriorityItem(
         id: task.id,
         title: task.title,
         summary: task.description ?? 'Needs immediate attention this shift.',
         band: PriorityBand.urgentNow,
-        timeStateLabel: normalizedStatus == 'escalated'
+        timeStateLabel: task.status == TaskStatus.escalated
             ? 'Escalated for review'
             : _formatOverdueLabel(dueAt, now),
         residentName: task.residentName ?? 'Assigned resident',
@@ -187,23 +361,27 @@ class PriorityItem {
   final String timeStateLabel;
   final String residentName;
   final String room;
-  final String status;
+  final TaskStatus status;
   final String? residentId;
   final ShiftTask? sourceTask;
 }
 
-class ResidentListItem {
+class ResidentListItem extends ResidentProfile {
   const ResidentListItem({
-    required this.id,
-    required this.fullName,
-    required this.roomLabel,
-    required this.floorNumber,
-    required this.unitLabel,
-    required this.recognitionImageKey,
-    required this.todaySummary,
-    required this.assignmentContext,
-    required this.contextLine,
-    required this.alerts,
+    required super.id,
+    required super.fullName,
+    required super.roomLabel,
+    required super.floorNumber,
+    required super.unitLabel,
+    required super.recognitionImageKey,
+    required super.todaySummary,
+    required super.assignmentContext,
+    required super.contextLine,
+    required super.alerts,
+    required super.baselinePriority,
+    required super.effectivePriority,
+    required super.prioritySource,
+    required super.activeIncidentCount,
   });
 
   factory ResidentListItem.fromJson(Map<String, dynamic> json) {
@@ -220,21 +398,18 @@ class ResidentListItem {
       alerts: (json['alerts'] as List<dynamic>? ?? const [])
           .map((alert) => alert as String)
           .toList(),
+      baselinePriority: ResidentPriorityLevelX.fromApiValue(
+        json['baselinePriority'] as String,
+      ),
+      effectivePriority: ResidentPriorityLevelX.fromApiValue(
+        json['effectivePriority'] as String,
+      ),
+      prioritySource: ResidentPrioritySourceX.fromApiValue(
+        json['prioritySource'] as String,
+      ),
+      activeIncidentCount: json['activeIncidentCount'] as int? ?? 0,
     );
   }
-
-  final String id;
-  final String fullName;
-  final String roomLabel;
-  final int floorNumber;
-  final String unitLabel;
-  final String recognitionImageKey;
-  final String todaySummary;
-  final String assignmentContext;
-  final String contextLine;
-  final List<String> alerts;
-
-  String get photoAssetPath => residentPhotoAssetPath(recognitionImageKey);
 }
 
 class ResidentTimelineEntry {
@@ -246,16 +421,22 @@ class ResidentTimelineEntry {
     required this.authorName,
     required this.timestamp,
     required this.media,
+    this.personalCareSubtype,
   });
 
   factory ResidentTimelineEntry.fromJson(Map<String, dynamic> json) {
     return ResidentTimelineEntry(
       id: json['id'] as String,
       type: ResidentEntryTypeX.fromApiValue(json['type'] as String),
+      personalCareSubtype: json['personalCareSubtype'] == null
+          ? null
+          : PersonalCareSubtypeX.fromApiValue(
+              json['personalCareSubtype'] as String,
+            ),
       title: json['title'] as String,
       details: json['details'] as String,
       authorName: json['authorName'] as String,
-      timestamp: _parseApiDateTime(json['timestamp'] as String),
+      timestamp: parseApiDateTime(json['timestamp'] as String),
       media: (json['media'] as List<dynamic>? ?? const [])
           .map(
             (entry) => ResidentTimelineMediaItem.fromJson(
@@ -268,6 +449,7 @@ class ResidentTimelineEntry {
 
   final String id;
   final ResidentEntryType type;
+  final PersonalCareSubtype? personalCareSubtype;
   final String title;
   final String details;
   final String authorName;
@@ -292,7 +474,7 @@ class ResidentTimelineMediaItem {
       mediaType: json['mediaType'] as String,
       byteSize: json['byteSize'] as int,
       downloadPath: json['downloadPath'] as String,
-      createdAt: _parseApiDateTime(json['createdAt'] as String),
+      createdAt: parseApiDateTime(json['createdAt'] as String),
     );
   }
 
@@ -302,6 +484,100 @@ class ResidentTimelineMediaItem {
   final int byteSize;
   final String downloadPath;
   final DateTime createdAt;
+}
+
+class ResidentIncidentMediaItem {
+  const ResidentIncidentMediaItem({
+    required this.id,
+    required this.originalFileName,
+    required this.mediaType,
+    required this.byteSize,
+    required this.createdAt,
+  });
+
+  factory ResidentIncidentMediaItem.fromJson(Map<String, dynamic> json) {
+    return ResidentIncidentMediaItem(
+      id: json['id'] as String,
+      originalFileName: json['originalFileName'] as String,
+      mediaType: json['mediaType'] as String,
+      byteSize: json['byteSize'] as int,
+      createdAt: parseApiDateTime(json['createdAt'] as String),
+    );
+  }
+
+  final String id;
+  final String originalFileName;
+  final String mediaType;
+  final int byteSize;
+  final DateTime createdAt;
+}
+
+class ResidentIncident {
+  const ResidentIncident({
+    required this.id,
+    required this.severity,
+    required this.status,
+    required this.category,
+    required this.categoryLabel,
+    required this.title,
+    required this.details,
+    required this.occurredAt,
+    required this.createdAt,
+    required this.createdByName,
+    required this.evidence,
+    this.acknowledgedAt,
+    this.acknowledgedByName,
+    this.resolvedAt,
+    this.resolvedByName,
+  });
+
+  factory ResidentIncident.fromJson(Map<String, dynamic> json) {
+    return ResidentIncident(
+      id: json['id'] as String,
+      severity: IncidentSeverityX.fromApiValue(json['severity'] as String),
+      status: IncidentStatusX.fromApiValue(json['status'] as String),
+      category: IncidentCategoryX.fromApiValue(json['category'] as String),
+      categoryLabel:
+          json['categoryLabel'] as String? ??
+          IncidentCategoryX.fromApiValue(json['category'] as String).label,
+      title: json['title'] as String,
+      details: json['details'] as String,
+      occurredAt: parseApiDateTime(json['occurredAt'] as String),
+      acknowledgedAt: json['acknowledgedAt'] == null
+          ? null
+          : parseApiDateTime(json['acknowledgedAt'] as String),
+      acknowledgedByName: json['acknowledgedByName'] as String?,
+      resolvedAt: json['resolvedAt'] == null
+          ? null
+          : parseApiDateTime(json['resolvedAt'] as String),
+      resolvedByName: json['resolvedByName'] as String?,
+      createdAt: parseApiDateTime(json['createdAt'] as String),
+      createdByName: json['createdByName'] as String,
+      evidence: (json['evidence'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ResidentIncidentMediaItem.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  final String id;
+  final IncidentSeverity severity;
+  final IncidentStatus status;
+  final IncidentCategory category;
+  final String categoryLabel;
+  final String title;
+  final String details;
+  final DateTime occurredAt;
+  final DateTime? acknowledgedAt;
+  final String? acknowledgedByName;
+  final DateTime? resolvedAt;
+  final String? resolvedByName;
+  final DateTime createdAt;
+  final String createdByName;
+  final List<ResidentIncidentMediaItem> evidence;
 }
 
 class TimelineEvidenceFile {
@@ -316,16 +592,16 @@ class TimelineEvidenceFile {
   final String mediaType;
 }
 
-class ResidentTaskSummary {
+class ResidentTaskSummary extends TaskRecord {
   const ResidentTaskSummary({
-    required this.id,
-    required this.title,
-    this.description,
-    required this.status,
-    this.dueAt,
-    this.residentId,
-    this.residentName,
-    this.room,
+    required super.id,
+    required super.title,
+    super.description,
+    required super.status,
+    super.dueAt,
+    super.residentId,
+    super.residentName,
+    super.room,
   });
 
   factory ResidentTaskSummary.fromJson(Map<String, dynamic> json) {
@@ -333,38 +609,34 @@ class ResidentTaskSummary {
       id: json['id'] as String,
       title: json['title'] as String,
       description: json['description'] as String?,
-      status: json['status'] as String,
+      status: TaskStatusX.fromApiValue(json['status'] as String),
       dueAt: json['dueAt'] == null
           ? null
-          : _parseApiDateTime(json['dueAt'] as String),
+          : parseApiDateTime(json['dueAt'] as String),
       residentId: json['residentId'] as String?,
       residentName: json['residentName'] as String?,
       room: json['room'] as String?,
     );
   }
-
-  final String id;
-  final String title;
-  final String? description;
-  final String status;
-  final DateTime? dueAt;
-  final String? residentId;
-  final String? residentName;
-  final String? room;
 }
 
-class ResidentDetail {
+class ResidentDetail extends ResidentProfile {
   const ResidentDetail({
-    required this.id,
-    required this.fullName,
-    required this.roomLabel,
-    required this.floorNumber,
-    required this.unitLabel,
-    required this.recognitionImageKey,
-    required this.todaySummary,
-    required this.assignmentContext,
-    required this.contextLine,
-    required this.alerts,
+    required super.id,
+    required super.fullName,
+    required super.roomLabel,
+    required super.floorNumber,
+    required super.unitLabel,
+    required super.recognitionImageKey,
+    required super.todaySummary,
+    required super.assignmentContext,
+    required super.contextLine,
+    required super.alerts,
+    required super.baselinePriority,
+    required super.effectivePriority,
+    required super.prioritySource,
+    required super.activeIncidentCount,
+    required this.activeIncidents,
     required this.currentTasks,
     required this.timeline,
   });
@@ -383,6 +655,22 @@ class ResidentDetail {
       alerts: (json['alerts'] as List<dynamic>? ?? const [])
           .map((alert) => alert as String)
           .toList(),
+      baselinePriority: ResidentPriorityLevelX.fromApiValue(
+        json['baselinePriority'] as String,
+      ),
+      effectivePriority: ResidentPriorityLevelX.fromApiValue(
+        json['effectivePriority'] as String,
+      ),
+      prioritySource: ResidentPrioritySourceX.fromApiValue(
+        json['prioritySource'] as String,
+      ),
+      activeIncidentCount: json['activeIncidentCount'] as int? ?? 0,
+      activeIncidents: (json['activeIncidents'] as List<dynamic>? ?? const [])
+          .map(
+            (incident) =>
+                ResidentIncident.fromJson(incident as Map<String, dynamic>),
+          )
+          .toList(),
       currentTasks: (json['currentTasks'] as List<dynamic>? ?? const [])
           .map(
             (task) =>
@@ -398,47 +686,68 @@ class ResidentDetail {
     );
   }
 
-  final String id;
-  final String fullName;
-  final String roomLabel;
-  final int floorNumber;
-  final String unitLabel;
-  final String recognitionImageKey;
-  final String todaySummary;
-  final String assignmentContext;
-  final String contextLine;
-  final List<String> alerts;
+  final List<ResidentIncident> activeIncidents;
   final List<ResidentTaskSummary> currentTasks;
   final List<ResidentTimelineEntry> timeline;
-
-  String get photoAssetPath => residentPhotoAssetPath(recognitionImageKey);
 }
 
 class ResidentTimelineEntryDraft {
   const ResidentTimelineEntryDraft({
     required this.type,
     required this.details,
+    this.personalCareSubtype,
     this.evidence,
   });
 
   final ResidentEntryType type;
   final String details;
+  final PersonalCareSubtype? personalCareSubtype;
   final TimelineEvidenceFile? evidence;
 
   Map<String, dynamic> toJson() {
-    return {'type': type.apiValue, 'details': details};
+    return {
+      'type': type.apiValue,
+      'details': details,
+      if (personalCareSubtype != null)
+        'personalCareSubtype': personalCareSubtype!.apiValue,
+    };
   }
 }
 
-class ShiftAssignment {
+class ResidentIncidentDraft {
+  const ResidentIncidentDraft({
+    required this.severity,
+    required this.category,
+    required this.title,
+    required this.details,
+    this.evidence,
+  });
+
+  final IncidentSeverity severity;
+  final IncidentCategory category;
+  final String title;
+  final String details;
+  final TimelineEvidenceFile? evidence;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'severity': severity.apiValue,
+      'category': category.apiValue,
+      'title': title,
+      'details': details,
+    };
+  }
+}
+
+class ShiftAssignment extends ShiftPeriod {
   const ShiftAssignment({
-    required this.id,
-    required this.name,
-    required this.startsAt,
-    required this.endsAt,
-    required this.status,
-    required this.floorNumber,
-    required this.unitLabel,
+    required super.id,
+    required super.name,
+    required super.startsAt,
+    required super.endsAt,
+    required super.status,
+    required super.floorNumber,
+    required super.unitLabel,
     this.handoverAcknowledged = false,
     this.handoverAcknowledgedAt,
   });
@@ -447,25 +756,17 @@ class ShiftAssignment {
     return ShiftAssignment(
       id: json['id'] as String,
       name: json['name'] as String,
-      startsAt: _parseApiDateTime(json['startsAt'] as String),
-      endsAt: _parseApiDateTime(json['endsAt'] as String),
-      status: json['status'] as String,
+      startsAt: parseApiDateTime(json['startsAt'] as String),
+      endsAt: parseApiDateTime(json['endsAt'] as String),
+      status: ShiftStatusX.fromApiValue(json['status'] as String),
       floorNumber: json['floorNumber'] as int,
       unitLabel: json['unitLabel'] as String,
       handoverAcknowledged: json['handoverAcknowledged'] as bool? ?? false,
       handoverAcknowledgedAt: json['handoverAcknowledgedAt'] == null
           ? null
-          : _parseApiDateTime(json['handoverAcknowledgedAt'] as String),
+          : parseApiDateTime(json['handoverAcknowledgedAt'] as String),
     );
   }
-
-  final String id;
-  final String name;
-  final DateTime startsAt;
-  final DateTime endsAt;
-  final String status;
-  final int floorNumber;
-  final String unitLabel;
   final bool handoverAcknowledged;
   final DateTime? handoverAcknowledgedAt;
 }
@@ -506,45 +807,4 @@ class ShiftRotaEntry {
   final DateTime startsAt;
   final DateTime endsAt;
   final String unit;
-}
-
-String residentPhotoAssetPath(String recognitionImageKey) {
-  switch (recognitionImageKey) {
-    case 'resident-a':
-    case 'resident-b':
-    case 'resident-c':
-    case 'resident-d':
-    default:
-      return 'assets/images/Resident.png';
-  }
-}
-
-List<ShiftRotaEntry> buildDemoRota(
-  DateTime reference, {
-  String unit = 'Willow Floor',
-}) {
-  final dayStart = DateTime(reference.year, reference.month, reference.day);
-  return [
-    ShiftRotaEntry(
-      id: 'rota-today',
-      label: 'Today',
-      startsAt: dayStart.add(const Duration(hours: 7)),
-      endsAt: dayStart.add(const Duration(hours: 15, minutes: 30)),
-      unit: unit,
-    ),
-    ShiftRotaEntry(
-      id: 'rota-tomorrow',
-      label: 'Tomorrow',
-      startsAt: dayStart.add(const Duration(days: 1, hours: 7)),
-      endsAt: dayStart.add(const Duration(days: 1, hours: 15, minutes: 30)),
-      unit: unit,
-    ),
-    ShiftRotaEntry(
-      id: 'rota-next',
-      label: 'Next Scheduled',
-      startsAt: dayStart.add(const Duration(days: 2, hours: 13)),
-      endsAt: dayStart.add(const Duration(days: 2, hours: 21)),
-      unit: unit,
-    ),
-  ];
 }

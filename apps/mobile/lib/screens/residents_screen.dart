@@ -4,6 +4,8 @@ import '../api/api_client.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
 import 'resident_detail_screen.dart';
+import '../widgets/resident_priority_badge.dart';
+import '../widgets/screen_message_state.dart';
 
 class ResidentsScreen extends StatefulWidget {
   const ResidentsScreen({
@@ -47,9 +49,6 @@ class ResidentsScreenState extends State<ResidentsScreen> {
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Failed to load residents.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -101,14 +100,16 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                   child: CircularProgressIndicator(color: AppTheme.primaryBlue),
                 )
               : _errorMessage != null && _residents.isEmpty
-              ? _ResidentsMessageState(
+              ? ScreenMessageState(
+                  imageAssetPath: 'assets/images/Resident.png',
                   title: 'Residents couldn\'t be loaded',
                   message: _errorMessage!,
                   actionLabel: 'Try Again',
                   onAction: _loadResidents,
                 )
               : _residents.isEmpty
-              ? const _ResidentsMessageState(
+              ? const ScreenMessageState(
+                  imageAssetPath: 'assets/images/Resident.png',
                   title: 'No residents assigned',
                   message:
                       'Residents will appear here when the shift is active.',
@@ -258,6 +259,21 @@ class _ResidentListCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ResidentPriorityBadge(
+                          priority: resident.effectivePriority,
+                          source: resident.prioritySource,
+                        ),
+                        if (resident.activeIncidentCount > 0)
+                          _ResidentIncidentCountPill(
+                            count: resident.activeIncidentCount,
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: 6),
                     Text(
                       resident.contextLine,
@@ -303,49 +319,25 @@ class _ResidentListCard extends StatelessWidget {
   }
 }
 
-class _ResidentsMessageState extends StatelessWidget {
-  const _ResidentsMessageState({
-    required this.title,
-    required this.message,
-    this.actionLabel,
-    this.onAction,
-  });
+class _ResidentIncidentCountPill extends StatelessWidget {
+  const _ResidentIncidentCountPill({required this.count});
 
-  final String title;
-  final String message;
-  final String? actionLabel;
-  final VoidCallback? onAction;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset('assets/images/Resident.png', height: 160),
-            const SizedBox(height: 24),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              message,
-              style: Theme.of(context).textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: onAction,
-                icon: const Icon(Icons.refresh),
-                label: Text(actionLabel!),
-              ),
-            ],
-          ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryBlueLight,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.borderLight),
+      ),
+      child: Text(
+        '$count active incident${count == 1 ? '' : 's'}',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: AppTheme.primaryBlueDark,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

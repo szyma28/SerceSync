@@ -42,7 +42,7 @@ Structured entry types in this milestone include:
 
 ## Photo Support And Governance
 
-Photo support is part of the long-term care-evidence direction for SerceSync, but in this milestone it is surfaced only as a governed placeholder rather than a live capture/upload feature.
+Photo support is reserved for a later milestone and is documented here as a governed placeholder rather than a live capture/upload feature.
 
 The dissertation should explicitly distinguish between different kinds of images:
 
