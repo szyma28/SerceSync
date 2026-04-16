@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/handover.dart';
+import '../models/shared_models.dart';
 import '../models/task.dart';
 import '../models/user.dart';
 import '../theme/app_theme.dart';
@@ -116,16 +117,16 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
       displayedTasks = _tasks
           .where(
             (t) =>
-                t.status.toLowerCase() != 'completed' &&
-                t.status.toLowerCase() != 'deferred',
+                t.status != TaskStatus.completed &&
+                t.status != TaskStatus.deferred,
           )
           .toList();
     } else if (_filter == 'Priority') {
       displayedTasks = _tasks
           .where(
             (t) =>
-                t.status.toLowerCase() == 'overdue' ||
-                t.status.toLowerCase() == 'escalated',
+                t.status == TaskStatus.overdue ||
+                t.status == TaskStatus.escalated,
           )
           .toList();
     }
@@ -562,7 +563,7 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                       ),
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Mark as Complete'),
-                      onPressed: widget.task.status.toLowerCase() == 'completed'
+                      onPressed: widget.task.status == TaskStatus.completed
                           ? null
                           : () => _performAction('complete'),
                     ),

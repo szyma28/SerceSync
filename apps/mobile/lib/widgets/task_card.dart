@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/shared_models.dart';
 import '../models/task.dart';
 import '../theme/app_theme.dart';
 import 'date_time_formatters.dart';
@@ -11,17 +12,15 @@ class TaskCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   Color get _borderColor {
-    switch (task.status.toLowerCase()) {
-      case 'overdue':
-      case 'escalated':
+    switch (task.status) {
+      case TaskStatus.overdue:
+      case TaskStatus.escalated:
         return AppTheme.errorRed;
-      case 'deferred':
+      case TaskStatus.deferred:
         return AppTheme.warningYellow;
-      case 'completed':
+      case TaskStatus.completed:
         return AppTheme.successGreen;
-      case 'routine':
-      case 'pending':
-      default:
+      case TaskStatus.pending:
         return AppTheme.primaryBlue;
     }
   }
@@ -39,7 +38,7 @@ class TaskCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: AppTheme.premiumShadow,
         border: Border.all(
-          color: task.status.toLowerCase() == 'completed'
+          color: task.status == TaskStatus.completed
               ? AppTheme.borderLight
               : _borderColor.withAlpha(80),
           width: 1.5,
@@ -78,7 +77,7 @@ class TaskCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      task.status.toLowerCase() == 'completed'
+                      task.status == TaskStatus.completed
                           ? Icons.task_alt_rounded
                           : _isMeds
                           ? Icons.medical_services_outlined

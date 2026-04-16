@@ -290,7 +290,6 @@ class _ResidentTaskCard extends StatelessWidget {
       case TaskStatus.completed:
         return 'Completed';
       case TaskStatus.pending:
-      default:
         return 'Due';
     }
   }
