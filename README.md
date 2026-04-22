@@ -1,124 +1,86 @@
 # SerceSync
 
-SerceSync is a care-home workflow system designed to improve handover reliability, task accountability, exception visibility, and audit-ready reporting.
+SerceSync is a care-home workflow system focused on safer shift handovers, clearer task accountability, richer resident context, medication visibility, and manager-ready operational reporting.
 
-The project is being developed as a final-year software development dissertation project and consists of:
-- a Flutter mobile app for carers and senior carers
+The repository contains:
+
+- a Flutter mobile app for carers and nurses
 - a Flutter web app for managers
 - a NestJS backend API
-- a PostgreSQL database accessed through Prisma
+- a PostgreSQL database managed through Prisma
 
-## Key features
+## Current product areas
 
-- mandatory shift-start handover acknowledgement
-- clear task completion, defer, and escalate flows
-- manager-facing exception visibility and reporting
-- audit-oriented workflow tracking
-- deterministic simulation support for testing and demonstration
+### Mobile workspace
 
-## Core workflow
+- login with seeded local accounts
+- mandatory handover acknowledgement before shift work begins
+- priorities view for urgent tasks and medication signals
+- resident directory and resident detail workflows
+- nurse-specific medication round tools
+- personal-care, meal-intake, and incident-aware resident context
 
-The main workflow SerceSync is designed around is:
+### Manager workspace
 
-1. shift start
-2. mandatory handover acknowledgement
-3. task completion during shift
-4. manager exceptions dashboard and evidence reporting
+- manager login and session restore
+- live dashboard coverage across active floors
+- resident directory with create and edit flows
+- baseline priority and resident profile context management
+- lightweight reporting and CSV export workflows
 
-## Delivery methodology
+### Backend
 
-Implementation is delivered in vertical slices.
-
-Each slice should:
-- solve one meaningful workflow end to end
-- enforce business rules in the API rather than in the clients
-- include test evidence before it is treated as complete
-- produce a supporting feature note in `docs/` for dissertation traceability
-
-Completed slices and supporting delivery notes are documented in:
-- `docs/requirements/handover-acknowledgement-vertical-slice.md`
-- `docs/requirements/task-accountability-backend-slice.md`
-- `docs/requirements/mobile-shift-workspace-vertical-slice.md`
-- `docs/requirements/manager-residents-media-live-shift-vertical-slice.md`
-- `docs/requirements/mobile-workspace-ia-pivot.md`
-
-## Technology stack
-
-- Frontend: Flutter and Dart
-- Backend: NestJS and TypeScript
-- Database: PostgreSQL
-- ORM: Prisma
+- authentication and role-aware access
+- shifts, handovers, residents, tasks, and medication workflows
+- manager dashboard aggregation and reporting endpoints
+- local seed and reset scripts for deterministic demo data
 
 ## Architecture overview
 
-SerceSync follows a client-server architecture:
+SerceSync uses a standard client-server split:
 
 - Flutter mobile app -> NestJS API
 - Flutter web app -> NestJS API
 - NestJS API -> PostgreSQL via Prisma
 
-PostgreSQL is never accessed directly by Flutter clients. Authentication, role-based access control, workflow logic, audit logic, and reporting should all be enforced server-side.
+The Flutter clients do not access PostgreSQL directly. Authentication, workflow rules, audit-sensitive behavior, and reporting logic are enforced in the API layer.
 
-## Project structure
+## Repository layout
 
 ```text
 FlutterAppSerceSync/
   README.md
-  .gitignore
-  .editorconfig
   .env.example
-  docs/
-    architecture/
-    requirements/
-    testing/
   apps/
+    api/
     mobile/
     web/
-    api/
+  packages/
+    sercesync_domain/
 ```
 
 ## Development requirements
 
 Install the following before running the project:
 
-### General
 - Git
-- Node.js LTS
-- pnpm
-- PostgreSQL
-- Flutter SDK
-- Xcode (for iOS simulator on macOS)
+- Node.js 22 LTS or newer
+- pnpm 10 or newer
+- PostgreSQL 16 or newer
+- Flutter stable channel
+- Xcode for the iOS simulator on macOS
 
-### Verify Flutter
+Useful checks:
 
 ```bash
 flutter --version
 flutter doctor
-```
-
-### Verify Node and pnpm
-
-```bash
 node --version
 pnpm --version
-```
-
-### Verify PostgreSQL
-
-```bash
 psql --version
 ```
 
-Recommended baseline versions:
-
-- Node.js 22 LTS or newer
-- pnpm 10 or newer
-- Flutter stable channel
-- PostgreSQL 16 or newer
-
 ## Getting started
-
-This repository contains the dissertation prototype and the slice notes used for traceability.
 
 ### 1. Enter the project
 
@@ -126,15 +88,13 @@ This repository contains the dissertation prototype and the slice notes used for
 cd FlutterAppSerceSync
 ```
 
-### 2. Copy local environment values
+### 2. Create local environment values
 
 ```bash
 cp .env.example .env
 ```
 
-Adjust values as needed for your local machine.
-
-If your local PostgreSQL role is not `postgres`, update `DATABASE_URL` to match your machine.
+Update `DATABASE_URL` if your local PostgreSQL role is not `postgres`.
 
 Example for a local Homebrew PostgreSQL install on macOS:
 
@@ -142,63 +102,46 @@ Example for a local Homebrew PostgreSQL install on macOS:
 DATABASE_URL=postgresql://your_local_role@localhost:5432/sercesync?host=/tmp
 ```
 
-### 3. Create the local PostgreSQL database
-
-If PostgreSQL is already running locally, create the development database:
+### 3. Create the local database
 
 ```bash
 createdb sercesync
 ```
 
-If you prefer using `psql`:
+Or with `psql`:
 
 ```bash
 psql postgres -c "CREATE DATABASE sercesync;"
 ```
 
-### 4. Initialize the backend database foundation
+### 4. Install backend dependencies and prepare Prisma
 
 ```bash
 cd apps/api
+pnpm install
 pnpm run prisma:format
 pnpm run prisma:validate
 pnpm run prisma:generate
 pnpm run db:migrate
 ```
 
-This applies the Prisma migrations and initializes the backend schema.
-
-### 5. Seed demo data
+### 5. Seed local baseline data
 
 ```bash
 pnpm run db:seed
 ```
 
-The seed creates demo users, an active shift, a handover, live tasks, and resident records so the implemented mobile and web slices can be demonstrated locally.
+The seed creates local users, active and upcoming shifts, handover data, residents, tasks, incidents, medication context, and manager-facing records so the mobile and web apps can be exercised immediately.
 
-### 6. Reset the demo back to the standard baseline
-
-If you want the same known resident directory, handover, and live priority set again before a demo or review, run:
+### 6. Reset local demo data when needed
 
 ```bash
-cd apps/api
-pnpm run db:reset-demo
+pnpm run db:reset-local
 ```
 
-This clears the local demo workflow data that changes during use and recreates the standard baseline, including:
-- the active carer shift
-- the handover
-- the four live priority tasks used in the mobile workflow
-- the seeded resident directory used by both mobile and manager web
+This restores the standard baseline for local review and testing.
 
-
-## Environment configuration
-
-A project-level `.env.example` file defines the minimum required local environment variables.
-
-No real resident-identifiable data should be used in development, testing, or demonstration. Synthetic data only.
-
-### Environment variables
+## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
@@ -211,44 +154,9 @@ No real resident-identifiable data should be used in development, testing, or de
 | `WEB_APP_URL` | Local Flutter web URL |
 | `MOBILE_APP_SCHEME` | Reserved mobile app scheme identifier |
 
+Use synthetic data only for development, testing, and demos.
 
-
-## Run commands
-
-### Mobile app
-
-```bash
-cd apps/mobile
-flutter run
-```
-
-The mobile app supports:
-- login with seeded demo credentials
-- handover display
-- handover acknowledgement
-- post-handover workspace navigation across Priorities, Residents, and My Shift
-- live priority completion from the resident detail screen
-- resident notes with optional photo evidence upload
-- shift assignments pulled from the API
-
-The API base URL defaults to `http://localhost:3000`.
-If you need to override it, pass a Dart define:
-
-```bash
-flutter run --dart-define=API_BASE_URL=http://localhost:3000
-```
-
-### Web app
-
-```bash
-cd apps/web
-flutter run -d chrome
-```
-
-The web app now includes a first-pass manager workspace with:
-- manager login
-- resident directory visibility across floors
-- create and edit resident records
+## Running the apps
 
 ### API
 
@@ -257,77 +165,60 @@ cd apps/api
 pnpm run start:dev
 ```
 
-The API supports the delivered slices with:
-- `POST /auth/login`
-- `GET /shifts/current`
-- `GET /shifts/my`
-- `GET /handovers/current`
-- `POST /handovers/current/acknowledge`
-- `GET /tasks/current`
-- `POST /tasks/:id/complete`
-- `POST /tasks/:id/defer`
-- `POST /tasks/:id/escalate`
-- `GET /residents`
-- `GET /residents/:id`
-- `POST /residents/:id/timeline`
-- `GET /resident-media/:id`
-- `GET /manager/residents`
-- `POST /manager/residents`
-- `PATCH /manager/residents/:id`
+### Mobile
 
-### Prisma and database scripts
+```bash
+cd apps/mobile
+flutter run --dart-define=API_BASE_URL=http://localhost:3000
+```
+
+If `API_BASE_URL` is omitted, the app defaults to `http://localhost:3000`.
+
+### Web
+
+```bash
+cd apps/web
+flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000
+```
+
+If `API_BASE_URL` is omitted, the app defaults to `http://localhost:3000`.
+
+## Verification
+
+### API
 
 ```bash
 cd apps/api
-pnpm run prisma:format
-pnpm run prisma:validate
-pnpm run prisma:generate
-pnpm run db:migrate
-pnpm run db:seed
-pnpm run db:reset-demo
-pnpm run db:status
+pnpm run build
+pnpm run test
+pnpm run test:e2e
 ```
 
-### Schema foundation
+### Mobile
 
-The Prisma schema includes:
+```bash
+cd apps/mobile
+flutter analyze
+flutter test
+```
 
-- `Role`
-- `User`
-- `Shift`
-- `Handover`
-- `HandoverAcknowledgement`
-- `Task`
-- `Resident`
-- `ResidentTimelineEntry`
-- `ResidentTimelineMedia`
-- `AuditEvent`
+### Web
 
-This now supports:
+```bash
+cd apps/web
+flutter analyze
+flutter test
+```
 
-- the handover acknowledgement vertical slice
-- the task accountability backend slice
-- the mobile shift workspace slice
-- the manager residents, media, and live shift slice
+## Seeded local accounts
 
-The next planned workflow step is the manager exceptions dashboard and evidence reporting layer.
+Common local accounts used during development include:
 
-## Current demo credentials
+- mobile carer: `carer@sercesync.local` / `Password123!`
+- mobile nurse: `nurse@sercesync.local` / `Password123!`
+- web manager: `manager@sercesync.local` / `Password123!`
 
-After running `pnpm run db:seed`, use:
+## Notes
 
-- carer: `carer@sercesync.local` / `Password123!`
-- manager: `manager@sercesync.local` / `Password123!`
-
-## Continuous integration
-
-The repository includes a minimal GitHub Actions workflow in `.github/workflows/ci.yml`.
-It runs on every push to `main` and on every pull request.
-
-### CI checks
-
-- `apps/mobile`: `flutter analyze` and `flutter test`
-- `apps/web`: `flutter analyze` and `flutter test`
-- `apps/api`: `pnpm run prisma:generate`, `pnpm run db:deploy`, `pnpm run build`, `pnpm run test`, and `pnpm run test:e2e`
-
-The API CI job uses a temporary PostgreSQL service inside GitHub Actions, so it does not depend on any external hosted database.
+- Local scripts and seeded data are intended to make review and demos repeatable.
+- If `pnpm run test:e2e` fails, check that PostgreSQL is running and `DATABASE_URL` is valid before troubleshooting the app itself.

@@ -1,82 +1,62 @@
-part of '../../manager_app.dart';
+import 'dart:async';
 
-class ManagerShell extends StatefulWidget {
-  const ManagerShell({super.key, required this.apiClient});
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'manager_api_client.dart';
+import 'manager_file_download_api.dart';
+import 'manager_login.dart';
+import 'manager_session_controller.dart';
+import 'manager_workspace.dart';
+
+class ManagerShell extends StatelessWidget {
+  const ManagerShell({
+    super.key,
+    required this.apiClient,
+    required this.fileDownloader,
+  });
 
   final SerceSyncManagerApiClient apiClient;
+  final ManagerFileDownloader fileDownloader;
 
   @override
-  State<ManagerShell> createState() => _ManagerShellState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => ManagerSessionController(apiClient: apiClient)
+        ..restoreSession(),
+      child: _ManagerShellView(
+        apiClient: apiClient,
+        fileDownloader: fileDownloader,
+      ),
+    );
+  }
 }
 
-class _ManagerShellState extends State<ManagerShell> {
-  ManagerSession? _session;
-  bool _isRestoringSession = true;
-  String? _restoreErrorMessage;
+class _ManagerShellView extends StatelessWidget {
+  const _ManagerShellView({
+    required this.apiClient,
+    required this.fileDownloader,
+  });
 
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_restoreSession());
-  }
+  final SerceSyncManagerApiClient apiClient;
+  final ManagerFileDownloader fileDownloader;
 
-  Future<void> _restoreSession() async {
-    try {
-      final session = await widget.apiClient.restoreSession();
-      if (!mounted) return;
-      setState(() {
-        _session = session;
-        _restoreErrorMessage = null;
-      });
-    } on ApiException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _session = null;
-        _restoreErrorMessage = error.statusCode == 401 ? null : error.message;
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isRestoringSession = false);
-      }
-    }
-  }
-
-  void _handleSessionCreated(ManagerSession session) {
-    setState(() => _session = session);
-  }
-
-  void _handleLogout() {
-    unawaited(_logout());
-  }
-
-  Future<void> _logout() async {
-    try {
-      await widget.apiClient.logout();
-    } on ApiException catch (error) {
-      if (error.statusCode != 401) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
-        return;
-      }
+  Future<void> _handleLogout(BuildContext context) async {
+    final errorMessage = await context.read<ManagerSessionController>().logout();
+    if (!context.mounted || errorMessage == null) {
+      return;
     }
 
-    if (!mounted) return;
-    setState(() => _session = null);
-  }
-
-  void _retrySessionRestore() {
-    setState(() {
-      _isRestoringSession = true;
-      _restoreErrorMessage = null;
-    });
-    unawaited(_restoreSession());
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(errorMessage)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isRestoringSession) {
+    final sessionController = context.watch<ManagerSessionController>();
+
+    if (sessionController.isRestoringSession) {
       return const Scaffold(
         body: Center(
           child: SizedBox(
@@ -88,7 +68,7 @@ class _ManagerShellState extends State<ManagerShell> {
       );
     }
 
-    if (_restoreErrorMessage != null) {
+    if (sessionController.restoreErrorMessage != null) {
       return Scaffold(
         body: Center(
           child: Padding(
@@ -104,10 +84,17 @@ class _ManagerShellState extends State<ManagerShell> {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 12),
-                  Text(_restoreErrorMessage!, textAlign: TextAlign.center),
+                  Text(
+                    sessionController.restoreErrorMessage!,
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 16),
                   FilledButton(
-                    onPressed: _retrySessionRestore,
+                    onPressed: () {
+                      unawaited(
+                        context.read<ManagerSessionController>().restoreSession(),
+                      );
+                    },
                     child: const Text('Retry'),
                   ),
                 ],
@@ -118,17 +105,15 @@ class _ManagerShellState extends State<ManagerShell> {
       );
     }
 
-    if (_session == null) {
-      return ManagerLoginScreen(
-        apiClient: widget.apiClient,
-        onLoggedIn: _handleSessionCreated,
-      );
+    if (sessionController.session == null) {
+      return const ManagerLoginScreen();
     }
 
     return ManagerWorkspaceScreen(
-      apiClient: widget.apiClient,
-      session: _session!,
-      onLogout: _handleLogout,
+      apiClient: apiClient,
+      fileDownloader: fileDownloader,
+      session: sessionController.session!,
+      onLogout: () => unawaited(_handleLogout(context)),
     );
   }
 }

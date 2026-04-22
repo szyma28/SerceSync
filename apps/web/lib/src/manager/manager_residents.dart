@@ -1,18 +1,31 @@
-part of '../../manager_app.dart';
+import 'dart:math' as math;
 
-class _ResidentsManagement extends StatelessWidget {
-  const _ResidentsManagement({
+import 'package:flutter/material.dart';
+
+import 'manager_api_client.dart';
+import 'manager_emar.dart';
+import 'manager_file_download_api.dart';
+import 'manager_models.dart';
+import 'manager_shared.dart';
+import 'manager_theme.dart';
+
+class ResidentsManagement extends StatelessWidget {
+  const ResidentsManagement({
     super.key,
+    required this.apiClient,
+    required this.fileDownloader,
+    required this.accessToken,
     required this.residents,
     required this.isLoading,
     required this.isSaving,
+    required this.isEditorVisible,
     required this.errorMessage,
     required this.editingResidentId,
     required this.fullNameController,
     required this.roomNumberController,
     required this.floorNumberController,
     required this.unitLabelController,
-    required this.careSummaryController,
+    required this.aboutMeController,
     required this.recognitionImageKey,
     required this.isActive,
     required this.baselinePriority,
@@ -20,20 +33,26 @@ class _ResidentsManagement extends StatelessWidget {
     required this.onActiveChanged,
     required this.onBaselinePriorityChanged,
     required this.onCreateResident,
+    required this.onCloseResidentEditor,
     required this.onEditResident,
+    required this.onMedicationDataChanged,
     required this.onSaveResident,
   });
 
+  final SerceSyncManagerApiClient apiClient;
+  final ManagerFileDownloader fileDownloader;
+  final String accessToken;
   final List<ManagerResidentRecord> residents;
   final bool isLoading;
   final bool isSaving;
+  final bool isEditorVisible;
   final String? errorMessage;
   final String? editingResidentId;
   final TextEditingController fullNameController;
   final TextEditingController roomNumberController;
   final TextEditingController floorNumberController;
   final TextEditingController unitLabelController;
-  final TextEditingController careSummaryController;
+  final TextEditingController aboutMeController;
   final String recognitionImageKey;
   final bool isActive;
   final ManagerResidentPriorityLevel baselinePriority;
@@ -41,14 +60,16 @@ class _ResidentsManagement extends StatelessWidget {
   final ValueChanged<bool> onActiveChanged;
   final ValueChanged<ManagerResidentPriorityLevel> onBaselinePriorityChanged;
   final VoidCallback onCreateResident;
+  final VoidCallback onCloseResidentEditor;
   final ValueChanged<ManagerResidentRecord> onEditResident;
+  final Future<void> Function() onMedicationDataChanged;
   final Future<void> Function() onSaveResident;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final splitLayout = constraints.maxWidth >= 1120;
+        final splitLayout = isEditorVisible && constraints.maxWidth >= 1120;
         final formWidth = splitLayout
             ? math.max(320.0, constraints.maxWidth * 0.36)
             : constraints.maxWidth;
@@ -66,30 +87,36 @@ class _ResidentsManagement extends StatelessWidget {
                 residents: residents,
                 isLoading: isLoading,
                 errorMessage: errorMessage,
+                apiClient: apiClient,
+                fileDownloader: fileDownloader,
+                accessToken: accessToken,
                 onCreateResident: onCreateResident,
                 onEditResident: onEditResident,
+                onMedicationDataChanged: onMedicationDataChanged,
               ),
             ),
-            SizedBox(
-              width: formWidth,
-              child: _ResidentEditorCard(
-                isSaving: isSaving,
-                editingResidentId: editingResidentId,
-                fullNameController: fullNameController,
-                roomNumberController: roomNumberController,
-                floorNumberController: floorNumberController,
-                unitLabelController: unitLabelController,
-                careSummaryController: careSummaryController,
-                recognitionImageKey: recognitionImageKey,
-                isActive: isActive,
-                baselinePriority: baselinePriority,
-                onRecognitionImageChanged: onRecognitionImageChanged,
-                onActiveChanged: onActiveChanged,
-                onBaselinePriorityChanged: onBaselinePriorityChanged,
-                onCreateResident: onCreateResident,
-                onSaveResident: onSaveResident,
+            if (isEditorVisible)
+              SizedBox(
+                width: formWidth,
+                child: _ResidentEditorCard(
+                  isSaving: isSaving,
+                  editingResidentId: editingResidentId,
+                  fullNameController: fullNameController,
+                  roomNumberController: roomNumberController,
+                  floorNumberController: floorNumberController,
+                  unitLabelController: unitLabelController,
+                  aboutMeController: aboutMeController,
+                  recognitionImageKey: recognitionImageKey,
+                  isActive: isActive,
+                  baselinePriority: baselinePriority,
+                  onRecognitionImageChanged: onRecognitionImageChanged,
+                  onActiveChanged: onActiveChanged,
+                  onBaselinePriorityChanged: onBaselinePriorityChanged,
+                  onCreateResident: onCreateResident,
+                  onCloseResidentEditor: onCloseResidentEditor,
+                  onSaveResident: onSaveResident,
+                ),
               ),
-            ),
           ],
         );
       },
@@ -102,24 +129,32 @@ class _ResidentsListCard extends StatelessWidget {
     required this.residents,
     required this.isLoading,
     required this.errorMessage,
+    required this.apiClient,
+    required this.fileDownloader,
+    required this.accessToken,
     required this.onCreateResident,
     required this.onEditResident,
+    required this.onMedicationDataChanged,
   });
 
   final List<ManagerResidentRecord> residents;
   final bool isLoading;
   final String? errorMessage;
+  final SerceSyncManagerApiClient apiClient;
+  final ManagerFileDownloader fileDownloader;
+  final String accessToken;
   final VoidCallback onCreateResident;
   final ValueChanged<ManagerResidentRecord> onEditResident;
+  final Future<void> Function() onMedicationDataChanged;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _managerPanel,
+        color: managerPanel,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _managerBorder),
+        border: Border.all(color: managerBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,7 +172,7 @@ class _ResidentsListCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     const Text(
                       'Keep room placement, unit ownership, and care context aligned with the live manager view.',
-                      style: TextStyle(color: _managerMuted, height: 1.5),
+                      style: TextStyle(color: managerMuted, height: 1.5),
                     ),
                   ],
                 ),
@@ -145,8 +180,8 @@ class _ResidentsListCard extends StatelessWidget {
               FilledButton(
                 onPressed: onCreateResident,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _managerPrimarySoft,
-                  foregroundColor: _managerPrimary,
+                  backgroundColor: managerPrimarySoft,
+                  foregroundColor: managerPrimary,
                   elevation: 0,
                 ),
                 child: const Text('New Resident'),
@@ -158,7 +193,7 @@ class _ResidentsListCard extends StatelessWidget {
             Text(
               errorMessage!,
               style: const TextStyle(
-                color: _managerCritical,
+                color: managerCritical,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -170,7 +205,7 @@ class _ResidentsListCard extends StatelessWidget {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (residents.isEmpty)
-            const _EmptySurface(
+            const EmptySurface(
               title: 'No residents available',
               body:
                   'Create the first resident record to populate the manager workspace.',
@@ -182,6 +217,18 @@ class _ResidentsListCard extends StatelessWidget {
                   _ResidentDirectoryRow(
                     resident: resident,
                     onEdit: () => onEditResident(resident),
+                    onOpenEmar: () {
+                      showDialog<void>(
+                        context: context,
+                        builder: (context) => ResidentEmarDialog(
+                          apiClient: apiClient,
+                          fileDownloader: fileDownloader,
+                          accessToken: accessToken,
+                          resident: resident,
+                          onChanged: onMedicationDataChanged,
+                        ),
+                      );
+                    },
                   ),
                   if (resident != residents.last) const SizedBox(height: 10),
                 ],
@@ -194,10 +241,15 @@ class _ResidentsListCard extends StatelessWidget {
 }
 
 class _ResidentDirectoryRow extends StatelessWidget {
-  const _ResidentDirectoryRow({required this.resident, required this.onEdit});
+  const _ResidentDirectoryRow({
+    required this.resident,
+    required this.onEdit,
+    required this.onOpenEmar,
+  });
 
   final ManagerResidentRecord resident;
   final VoidCallback onEdit;
+  final VoidCallback onOpenEmar;
 
   @override
   Widget build(BuildContext context) {
@@ -207,23 +259,28 @@ class _ResidentDirectoryRow extends StatelessWidget {
         : '${resident.activeIncidentCount} active incidents';
 
     return Container(
+      key: ValueKey(
+        'resident-card-${resident.id}-${resident.effectivePriority.apiValue}',
+      ),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FBFE),
+        color: priorityTone.shellBackground,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _managerBorder),
+        border: Border.all(
+          color: priorityTone.shellBorder,
+          width:
+              resident.effectivePriority == ManagerResidentPriorityLevel.green
+              ? 1
+              : 1.5,
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: _managerPrimarySoft,
-            foregroundColor: _managerPrimary,
-            child: Text(
-              _initialsForName(resident.fullName),
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-            ),
+          ResidentPhotoAvatar(
+            fullName: resident.fullName,
+            recognitionImageKey: resident.recognitionImageKey,
+            size: 44,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -239,55 +296,51 @@ class _ResidentDirectoryRow extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    _ResidentMetaPill(label: resident.roomLabel),
-                    _ResidentMetaPill(label: resident.unitLabel),
-                    _ResidentMetaPill(label: 'Floor ${resident.floorNumber}'),
-                    _ResidentMetaPill(
-                      label:
-                          'Priority ${resident.effectivePriority.label.toUpperCase()}',
-                      foreground: priorityTone.foreground,
-                      background: priorityTone.background,
-                    ),
-                    _ResidentMetaPill(
+                    ResidentMetaPill(label: resident.roomLabel),
+                    ResidentMetaPill(label: resident.unitLabel),
+                    ResidentMetaPill(label: 'Floor ${resident.floorNumber}'),
+                    ResidentMetaPill(
                       label: incidentCountLabel,
                       foreground: resident.activeIncidentCount > 0
-                          ? _managerCritical
-                          : _managerMuted,
+                          ? managerCritical
+                          : managerMuted,
                       background: resident.activeIncidentCount > 0
-                          ? _managerCriticalSoft
+                          ? managerCriticalSoft
                           : const Color(0xFFF0F4F8),
                     ),
-                    _ResidentMetaPill(
+                    ResidentMetaPill(
                       label: resident.prioritySource.label,
                       foreground:
                           resident.prioritySource ==
                               ManagerResidentPrioritySource.incidentOverride
-                          ? _managerWarning
-                          : _managerMuted,
+                          ? managerWarning
+                          : managerMuted,
                       background:
                           resident.prioritySource ==
                               ManagerResidentPrioritySource.incidentOverride
-                          ? _managerWarningSoft
+                          ? managerWarningSoft
                           : const Color(0xFFF0F4F8),
                     ),
-                    _ResidentMetaPill(
+                    ResidentMetaPill(
                       label: resident.isActive ? 'Active' : 'Inactive',
                       foreground: resident.isActive
-                          ? _managerSuccess
-                          : _managerMuted,
+                          ? managerSuccess
+                          : managerMuted,
                       background: resident.isActive
-                          ? _managerSuccessSoft
+                          ? managerSuccessSoft
                           : const Color(0xFFF0F4F8),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  resident.careSummary,
+                  resident.aboutMe.isEmpty
+                      ? 'No about me note added yet.'
+                      : resident.aboutMe,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _managerMuted,
+                    color: managerMuted,
                     fontSize: 13,
                     height: 1.5,
                   ),
@@ -296,46 +349,30 @@ class _ResidentDirectoryRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          FilledButton.tonal(
-            onPressed: onEdit,
-            style: FilledButton.styleFrom(
-              foregroundColor: _managerPrimary,
-              backgroundColor: _managerPrimarySoft,
-            ),
-            child: const Text('Edit'),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FilledButton.tonal(
+                key: ValueKey('resident-emar-${resident.id}'),
+                onPressed: onOpenEmar,
+                style: FilledButton.styleFrom(
+                  foregroundColor: managerPrimary,
+                  backgroundColor: managerPrimarySoft,
+                ),
+                child: const Text('Medication chart'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: onEdit,
+                style: FilledButton.styleFrom(
+                  foregroundColor: managerPrimary,
+                  backgroundColor: managerPrimarySoft,
+                ),
+                child: const Text('Edit'),
+              ),
+            ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ResidentMetaPill extends StatelessWidget {
-  const _ResidentMetaPill({
-    required this.label,
-    this.foreground = _managerMuted,
-    this.background = const Color(0xFFF0F4F8),
-  });
-
-  final String label;
-  final Color foreground;
-  final Color background;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: foreground,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
       ),
     );
   }
@@ -349,7 +386,7 @@ class _ResidentEditorCard extends StatelessWidget {
     required this.roomNumberController,
     required this.floorNumberController,
     required this.unitLabelController,
-    required this.careSummaryController,
+    required this.aboutMeController,
     required this.recognitionImageKey,
     required this.isActive,
     required this.baselinePriority,
@@ -357,6 +394,7 @@ class _ResidentEditorCard extends StatelessWidget {
     required this.onActiveChanged,
     required this.onBaselinePriorityChanged,
     required this.onCreateResident,
+    required this.onCloseResidentEditor,
     required this.onSaveResident,
   });
 
@@ -366,7 +404,7 @@ class _ResidentEditorCard extends StatelessWidget {
   final TextEditingController roomNumberController;
   final TextEditingController floorNumberController;
   final TextEditingController unitLabelController;
-  final TextEditingController careSummaryController;
+  final TextEditingController aboutMeController;
   final String recognitionImageKey;
   final bool isActive;
   final ManagerResidentPriorityLevel baselinePriority;
@@ -374,6 +412,7 @@ class _ResidentEditorCard extends StatelessWidget {
   final ValueChanged<bool> onActiveChanged;
   final ValueChanged<ManagerResidentPriorityLevel> onBaselinePriorityChanged;
   final VoidCallback onCreateResident;
+  final VoidCallback onCloseResidentEditor;
   final Future<void> Function() onSaveResident;
 
   @override
@@ -381,9 +420,9 @@ class _ResidentEditorCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _managerPanel,
+        color: managerPanel,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _managerBorder),
+        border: Border.all(color: managerBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,16 +437,27 @@ class _ResidentEditorCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
               ),
-              TextButton(
-                onPressed: onCreateResident,
-                child: const Text('Reset'),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: onCreateResident,
+                    child: Text(
+                      editingResidentId == null ? 'Reset' : 'New Resident',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onCloseResidentEditor,
+                    child: const Text('Close'),
+                  ),
+                ],
               ),
             ],
           ),
           const SizedBox(height: 6),
           const Text(
             'Update the resident profile that powers the manager list and the mobile assignment context.',
-            style: TextStyle(color: _managerMuted, height: 1.5),
+            style: TextStyle(color: managerMuted, height: 1.5),
           ),
           const SizedBox(height: 18),
           TextFormField(
@@ -461,16 +511,60 @@ class _ResidentEditorCard extends StatelessWidget {
             },
           ),
           const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FBFE),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: managerBorder),
+            ),
+            child: Row(
+              children: [
+                ResidentPhotoAvatar(
+                  fullName: fullNameController.text.trim().isEmpty
+                      ? 'Resident preview'
+                      : fullNameController.text.trim(),
+                  recognitionImageKey: recognitionImageKey,
+                  size: 64,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Photo Preview',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: managerInk,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        recognitionImageKey,
+                        style: const TextStyle(
+                          color: managerMuted,
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             key: ValueKey('photo-$recognitionImageKey-$editingResidentId'),
             initialValue: recognitionImageKey,
             decoration: const InputDecoration(labelText: 'Photo Key'),
-            items: const [
-              DropdownMenuItem(value: 'resident-a', child: Text('resident-a')),
-              DropdownMenuItem(value: 'resident-b', child: Text('resident-b')),
-              DropdownMenuItem(value: 'resident-c', child: Text('resident-c')),
-              DropdownMenuItem(value: 'resident-d', child: Text('resident-d')),
-            ],
+            items: residentRecognitionImageKeys
+                .map(
+                  (photoKey) =>
+                      DropdownMenuItem(value: photoKey, child: Text(photoKey)),
+                )
+                .toList(growable: false),
             onChanged: (value) {
               if (value != null) {
                 onRecognitionImageChanged(value);
@@ -479,10 +573,10 @@ class _ResidentEditorCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           TextFormField(
-            controller: careSummaryController,
-            maxLines: 5,
+            controller: aboutMeController,
+            maxLines: 4,
             decoration: const InputDecoration(
-              labelText: 'Clinical Summary',
+              labelText: 'About Me',
               alignLabelWithHint: true,
             ),
           ),
@@ -498,7 +592,7 @@ class _ResidentEditorCard extends StatelessWidget {
             onPressed: isSaving ? null : () => onSaveResident(),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(52),
-              backgroundColor: _managerPrimary,
+              backgroundColor: managerPrimary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
@@ -525,10 +619,14 @@ class _ResidentPriorityTone {
   const _ResidentPriorityTone({
     required this.foreground,
     required this.background,
+    required this.shellBackground,
+    required this.shellBorder,
   });
 
   final Color foreground;
   final Color background;
+  final Color shellBackground;
+  final Color shellBorder;
 }
 
 _ResidentPriorityTone _residentPriorityToneFor(
@@ -537,18 +635,24 @@ _ResidentPriorityTone _residentPriorityToneFor(
   switch (priority) {
     case ManagerResidentPriorityLevel.red:
       return const _ResidentPriorityTone(
-        foreground: _managerCritical,
-        background: _managerCriticalSoft,
+        foreground: managerCritical,
+        background: managerCriticalSoft,
+        shellBackground: Color(0xFFFFF7F6),
+        shellBorder: Color(0xFFF8C2BC),
       );
     case ManagerResidentPriorityLevel.amber:
       return const _ResidentPriorityTone(
-        foreground: _managerWarning,
-        background: _managerWarningSoft,
+        foreground: managerWarning,
+        background: managerWarningSoft,
+        shellBackground: Color(0xFFFFFAF2),
+        shellBorder: Color(0xFFFFDEB0),
       );
     case ManagerResidentPriorityLevel.green:
       return const _ResidentPriorityTone(
-        foreground: _managerSuccess,
-        background: _managerSuccessSoft,
+        foreground: managerSuccess,
+        background: managerSuccessSoft,
+        shellBackground: Color(0xFFF8FBFE),
+        shellBorder: managerBorder,
       );
   }
 }

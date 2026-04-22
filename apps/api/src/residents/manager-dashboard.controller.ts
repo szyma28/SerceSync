@@ -28,7 +28,8 @@ export class ManagerDashboardController {
 
   @Get()
   getDashboard(
-    @Query('shiftId', new ParseUUIDPipe({ version: '4' })) shiftId: string,
+    @Query('shiftId', new ParseUUIDPipe({ version: '4', optional: true }))
+    shiftId?: string,
   ) {
     return this.residentsService.getManagerDashboard(shiftId);
   }

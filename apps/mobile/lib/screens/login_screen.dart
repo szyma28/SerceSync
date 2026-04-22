@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import '../api/api_client.dart';
+import 'package:provider/provider.dart';
+
+import '../controllers/mobile_session_controller.dart';
 import '../theme/app_theme.dart';
 import 'handover_screen.dart';
 
@@ -20,9 +22,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController(text: 'carer@sercesync.local');
   final _passwordController = TextEditingController(text: 'Password123!');
 
-  bool _isBusy = false;
-  String? _errorMessage;
-
   @override
   void dispose() {
     _apiBaseUrlController.dispose();
@@ -32,41 +31,28 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    setState(() {
-      _isBusy = true;
-      _errorMessage = null;
-    });
+    final sessionController = context.read<MobileSessionController>();
+    final loginSucceeded = await sessionController.login(
+      baseUrl: _apiBaseUrlController.text,
+      email: _emailController.text,
+      password: _passwordController.text,
+    );
 
-    try {
-      final client = SerceSyncApiClient(
-        baseUrl: _apiBaseUrlController.text.trim(),
-      );
-      final response = await client.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-
-      if (!mounted) return;
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HandoverScreen(
-            apiClient: client,
-            accessToken: response.accessToken,
-            user: response.user,
-          ),
-        ),
-      );
-    } on ApiException catch (error) {
-      if (mounted) setState(() => _errorMessage = error.message);
-    } finally {
-      if (mounted) setState(() => _isBusy = false);
+    if (!mounted || !loginSucceeded) {
+      return;
     }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const HandoverScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
+    final sessionController = context.watch<MobileSessionController>();
+    final isBusy = sessionController.isAuthenticating;
+    final errorMessage = sessionController.authErrorMessage;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -187,7 +173,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                   child: TextField(
                                     controller: _emailController,
-                                    enabled: !_isBusy,
+                                    enabled: !isBusy,
                                     keyboardType: TextInputType.emailAddress,
                                     style: const TextStyle(fontSize: 15),
                                     decoration: InputDecoration(
@@ -224,7 +210,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                   child: TextField(
                                     controller: _passwordController,
-                                    enabled: !_isBusy,
+                                    enabled: !isBusy,
                                     obscureText: true,
                                     style: const TextStyle(fontSize: 15),
                                     decoration: InputDecoration(
@@ -248,7 +234,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
 
-                                if (_errorMessage != null) ...[
+                                if (errorMessage != null) ...[
                                   const SizedBox(height: 16),
                                   Container(
                                     padding: const EdgeInsets.all(12),
@@ -266,7 +252,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: Text(
-                                            _errorMessage!,
+                                            errorMessage,
                                             style: const TextStyle(
                                               color: AppTheme.errorRed,
                                               fontSize: 13,
@@ -282,7 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 const SizedBox(height: 24),
 
                                 FilledButton(
-                                  onPressed: _isBusy ? null : _login,
+                                  onPressed: isBusy ? null : _login,
                                   style: FilledButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 14,
@@ -292,7 +278,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                     backgroundColor: AppTheme.primaryBlue,
                                   ),
-                                  child: _isBusy
+                                  child: isBusy
                                       ? const SizedBox(
                                           height: 20,
                                           width: 20,

@@ -39,8 +39,8 @@ export class CreateManagerResidentDto {
 
   @IsString()
   @IsNotEmpty()
-  @MaxLength(800)
-  careSummary!: string;
+  @MaxLength(1200)
+  aboutMe!: string;
 
   @IsOptional()
   @IsEnum(ResidentPriorityLevel)

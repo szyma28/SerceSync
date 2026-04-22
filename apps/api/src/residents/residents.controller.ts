@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   UploadedFile,
   UseGuards,
@@ -28,7 +29,7 @@ export class ResidentsController {
 
   @Get(':id')
   getResidentById(
-    @Param('id') residentId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) residentId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.residentsService.getResidentById(residentId, user);
@@ -43,7 +44,7 @@ export class ResidentsController {
     }),
   )
   createResidentTimelineEntry(
-    @Param('id') residentId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) residentId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() createResidentTimelineEntryDto: CreateResidentTimelineEntryDto,
     @UploadedFile()
@@ -71,7 +72,7 @@ export class ResidentsController {
     }),
   )
   createResidentIncident(
-    @Param('id') residentId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) residentId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() createResidentIncidentDto: CreateResidentIncidentDto,
     @UploadedFile()

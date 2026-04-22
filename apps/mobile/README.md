@@ -1,6 +1,6 @@
 # SerceSync Mobile
 
-Flutter client for carers and senior carers.
+Flutter client for carers and nurses.
 
 It covers login, handover acknowledgement, priorities, residents, and `My Shift`.
 

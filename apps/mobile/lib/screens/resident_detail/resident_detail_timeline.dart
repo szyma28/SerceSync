@@ -30,8 +30,49 @@ class _TimelineCard extends StatelessWidget {
     }
   }
 
+  List<Widget> _buildMetadataPills() {
+    final pills = <Widget>[];
+
+    if (entry.personalCareSubtype != null) {
+      pills.add(
+        _TimelineMetaPill(
+          icon: Icons.shower_outlined,
+          label: entry.personalCareSubtype!.label,
+          foreground: AppTheme.primaryBlueDark,
+          background: AppTheme.primaryBlueLight,
+        ),
+      );
+    }
+
+    if (entry.mealType != null) {
+      pills.add(
+        _TimelineMetaPill(
+          icon: Icons.restaurant_outlined,
+          label: entry.mealType!.label,
+          foreground: AppTheme.primaryBlueDark,
+          background: AppTheme.primaryBlueLight,
+        ),
+      );
+    }
+
+    if (entry.mealIntakeAmount != null) {
+      pills.add(
+        _TimelineMetaPill(
+          icon: Icons.monitor_heart_outlined,
+          label: entry.mealIntakeAmount!.label,
+          foreground: const Color(0xFF9A6700),
+          background: AppTheme.warningYellow.withAlpha(26),
+        ),
+      );
+    }
+
+    return pills;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final metadataPills = _buildMetadataPills();
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -64,25 +105,9 @@ class _TimelineCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (entry.personalCareSubtype != null) ...[
+                if (metadataPills.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryBlueLight,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      entry.personalCareSubtype!.label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppTheme.primaryBlueDark,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+                  Wrap(spacing: 8, runSpacing: 8, children: metadataPills),
                 ],
                 const SizedBox(height: 6),
                 Text(
@@ -158,6 +183,45 @@ class _TimelineCard extends StatelessWidget {
                   ),
                 ],
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineMetaPill extends StatelessWidget {
+  const _TimelineMetaPill({
+    required this.icon,
+    required this.label,
+    required this.foreground,
+    required this.background,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color foreground;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],

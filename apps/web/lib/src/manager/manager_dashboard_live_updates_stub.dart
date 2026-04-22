@@ -1,4 +1,4 @@
-import 'manager_dashboard_live_updates.dart';
+import 'manager_dashboard_live_updates_api.dart';
 
 ManagerDashboardLiveUpdatesConnector createManagerDashboardLiveUpdatesConnector(
   String baseUrl,
@@ -11,7 +11,7 @@ class _UnsupportedManagerDashboardLiveUpdatesConnector
   @override
   Stream<ManagerDashboardLiveUpdate> connect({
     required String accessToken,
-    required String shiftId,
+    String? shiftId,
   }) {
     return const Stream<ManagerDashboardLiveUpdate>.empty();
   }

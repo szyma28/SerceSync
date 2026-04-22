@@ -1,7 +1,12 @@
-part of '../../manager_app.dart';
+import 'package:flutter/material.dart';
 
-class _ManagerSidebar extends StatelessWidget {
-  const _ManagerSidebar({
+import 'manager_models.dart';
+import 'manager_shared.dart';
+import 'manager_theme.dart';
+
+class ManagerSidebar extends StatelessWidget {
+  const ManagerSidebar({
+    super.key,
     required this.user,
     required this.selectedTab,
     required this.onSelectTab,
@@ -16,8 +21,8 @@ class _ManagerSidebar extends StatelessWidget {
     return Container(
       width: 246,
       decoration: const BoxDecoration(
-        color: _managerPanel,
-        border: Border(right: BorderSide(color: _managerBorder)),
+        color: managerPanel,
+        border: Border(right: BorderSide(color: managerBorder)),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -43,16 +48,16 @@ class _ManagerSidebar extends StatelessWidget {
             decoration: BoxDecoration(
               color: const Color(0xFFF8FBFF),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _managerBorder),
+              border: Border.all(color: managerBorder),
             ),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: _managerPrimarySoft,
-                  foregroundColor: _managerPrimary,
+                  backgroundColor: managerPrimarySoft,
+                  foregroundColor: managerPrimary,
                   child: Text(
-                    _initialsForName(user.displayName),
+                    initialsForName(user.displayName),
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 12,
@@ -75,7 +80,7 @@ class _ManagerSidebar extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         user.role.label,
-                        style: TextStyle(color: _managerMuted, fontSize: 11),
+                        style: TextStyle(color: managerMuted, fontSize: 11),
                       ),
                     ],
                   ),
@@ -153,25 +158,10 @@ class _ManagerSidebar extends StatelessWidget {
                           onTap: () => onSelectTab(WorkspaceTab.residents),
                         ),
                         _SidebarNavItem(
-                          icon: Icons.badge_outlined,
-                          label: 'Staff & Shifts',
-                          isActive: false,
-                          onTap: () => onSelectTab(WorkspaceTab.staff),
-                        ),
-                        _SidebarNavItem(
-                          icon: Icons.insert_chart_outlined_rounded,
-                          label: 'Compliance Reports',
-                          isActive: false,
+                          icon: Icons.fact_check_outlined,
+                          label: 'Reporting',
+                          isActive: selectedTab == WorkspaceTab.compliance,
                           onTap: () => onSelectTab(WorkspaceTab.compliance),
-                        ),
-                        const SizedBox(height: 18),
-                        const _SidebarSectionLabel(label: 'TOOLS'),
-                        const SizedBox(height: 10),
-                        _SidebarNavItem(
-                          icon: Icons.article_outlined,
-                          label: 'Demo Console',
-                          isActive: false,
-                          onTap: () => onSelectTab(WorkspaceTab.console),
                         ),
                       ],
                     ),
@@ -218,7 +208,7 @@ class _SidebarSectionLabel extends StatelessWidget {
     return Text(
       label,
       style: const TextStyle(
-        color: _managerMuted,
+        color: managerMuted,
         fontSize: 11,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.9,
@@ -252,7 +242,7 @@ class _SidebarNavItem extends StatelessWidget {
           child: Ink(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
             decoration: BoxDecoration(
-              color: isActive ? _managerPrimarySoft : Colors.transparent,
+              color: isActive ? managerPrimarySoft : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
@@ -260,14 +250,14 @@ class _SidebarNavItem extends StatelessWidget {
                 Icon(
                   icon,
                   size: 18,
-                  color: isActive ? _managerPrimary : _managerMuted,
+                  color: isActive ? managerPrimary : managerMuted,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: isActive ? _managerPrimary : _managerInk,
+                      color: isActive ? managerPrimary : managerInk,
                       fontSize: 13,
                       fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
                     ),

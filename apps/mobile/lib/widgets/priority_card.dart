@@ -21,13 +21,33 @@ class PriorityCard extends StatelessWidget {
   }
 
   IconData get _icon {
-    final title = item.title.toLowerCase();
-    if (title.contains('med')) return Icons.medication_outlined;
-    if (title.contains('reposition') || title.contains('mobility')) {
-      return Icons.accessibility_new_outlined;
+    switch (item.sourceTask?.focus) {
+      case TaskFocus.medication:
+        return Icons.medication_outlined;
+      case TaskFocus.mobility:
+        return Icons.accessibility_new_outlined;
+      case TaskFocus.observation:
+        return Icons.visibility_outlined;
+      case TaskFocus.personalCare:
+        return Icons.shower_outlined;
+      case TaskFocus.hydration:
+        return Icons.local_drink_outlined;
+      case TaskFocus.general:
+      case null:
+        return Icons.priority_high_rounded;
     }
-    if (title.contains('observation')) return Icons.visibility_outlined;
-    return Icons.priority_high_rounded;
+  }
+
+  Color get _clinicalPriorityColor {
+    switch (item.sourceTask?.clinicalPriority) {
+      case TaskClinicalPriority.timeCritical:
+        return AppTheme.errorRed;
+      case TaskClinicalPriority.priority:
+        return AppTheme.warningYellow;
+      case TaskClinicalPriority.routine:
+      case null:
+        return AppTheme.primaryBlueDark;
+    }
   }
 
   @override
@@ -97,6 +117,21 @@ class PriorityCard extends StatelessWidget {
                     label: item.timeStateLabel,
                     accentColor: _accentColor,
                   ),
+                  if (item.sourceTask?.focus != null &&
+                      item.sourceTask!.focus != TaskFocus.general)
+                    _Pill(
+                      icon: _icon,
+                      label: item.sourceTask!.focus.label,
+                      accentColor: AppTheme.primaryBlueDark,
+                    ),
+                  if (item.sourceTask?.clinicalPriority != null &&
+                      item.sourceTask!.clinicalPriority !=
+                          TaskClinicalPriority.routine)
+                    _Pill(
+                      icon: Icons.priority_high_rounded,
+                      label: item.sourceTask!.clinicalPriority.label,
+                      accentColor: _clinicalPriorityColor,
+                    ),
                 ],
               ),
             ],

@@ -1,14 +1,11 @@
-part of '../../manager_app.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'manager_session_controller.dart';
+import 'manager_theme.dart';
 
 class ManagerLoginScreen extends StatefulWidget {
-  const ManagerLoginScreen({
-    super.key,
-    required this.apiClient,
-    required this.onLoggedIn,
-  });
-
-  final SerceSyncManagerApiClient apiClient;
-  final ValueChanged<ManagerSession> onLoggedIn;
+  const ManagerLoginScreen({super.key});
 
   @override
   State<ManagerLoginScreen> createState() => _ManagerLoginScreenState();
@@ -20,9 +17,6 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
   );
   final _passwordController = TextEditingController(text: 'Password123!');
 
-  bool _isBusy = false;
-  String? _errorMessage;
-
   @override
   void dispose() {
     _emailController.dispose();
@@ -31,30 +25,16 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
   }
 
   Future<void> _login() async {
-    setState(() {
-      _isBusy = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final session = await widget.apiClient.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-      if (!mounted) return;
-      widget.onLoggedIn(session);
-    } on ApiException catch (error) {
-      if (!mounted) return;
-      setState(() => _errorMessage = error.message);
-    } finally {
-      if (mounted) {
-        setState(() => _isBusy = false);
-      }
-    }
+    await context.read<ManagerSessionController>().login(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final sessionController = context.watch<ManagerSessionController>();
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -75,12 +55,12 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(40),
                       decoration: BoxDecoration(
-                        color: _managerShell,
+                        color: managerShell,
                         borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: _managerBorder),
+                        border: Border.all(color: managerBorder),
                         boxShadow: const [
                           BoxShadow(
-                            color: _managerShadow,
+                            color: managerShadow,
                             blurRadius: 40,
                             offset: Offset(0, 18),
                           ),
@@ -96,12 +76,12 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                                 width: 44,
                                 height: 44,
                                 decoration: BoxDecoration(
-                                  color: _managerPrimarySoft,
+                                  color: managerPrimarySoft,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                                 child: const Icon(
                                   Icons.favorite_border_rounded,
-                                  color: _managerPrimary,
+                                  color: managerPrimary,
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -123,7 +103,7 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                           const Text(
                             'Open the desktop oversight view for live exceptions, handover readiness, and resident records across the unit.',
                             style: TextStyle(
-                              color: _managerMuted,
+                              color: managerMuted,
                               fontSize: 15,
                               height: 1.6,
                             ),
@@ -157,12 +137,12 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(30),
                       decoration: BoxDecoration(
-                        color: _managerPanel,
+                        color: managerPanel,
                         borderRadius: BorderRadius.circular(28),
-                        border: Border.all(color: _managerBorder),
+                        border: Border.all(color: managerBorder),
                         boxShadow: const [
                           BoxShadow(
-                            color: _managerShadow,
+                            color: managerShadow,
                             blurRadius: 36,
                             offset: Offset(0, 16),
                           ),
@@ -179,12 +159,12 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                           const SizedBox(height: 10),
                           const Text(
                             'Use the seeded manager account to open the live dashboard workspace.',
-                            style: TextStyle(color: _managerMuted, height: 1.5),
+                            style: TextStyle(color: managerMuted, height: 1.5),
                           ),
                           const SizedBox(height: 24),
                           TextFormField(
                             controller: _emailController,
-                            enabled: !_isBusy,
+                            enabled: !sessionController.isAuthenticating,
                             decoration: const InputDecoration(
                               labelText: 'Email address',
                             ),
@@ -192,34 +172,36 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
                           const SizedBox(height: 14),
                           TextFormField(
                             controller: _passwordController,
-                            enabled: !_isBusy,
+                            enabled: !sessionController.isAuthenticating,
                             obscureText: true,
                             decoration: const InputDecoration(
                               labelText: 'Password',
                             ),
                           ),
-                          if (_errorMessage != null) ...[
+                          if (sessionController.authErrorMessage != null) ...[
                             const SizedBox(height: 14),
                             Text(
-                              _errorMessage!,
+                              sessionController.authErrorMessage!,
                               style: const TextStyle(
-                                color: _managerCritical,
+                                color: managerCritical,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                           ],
                           const SizedBox(height: 22),
                           FilledButton(
-                            onPressed: _isBusy ? null : _login,
+                            onPressed: sessionController.isAuthenticating
+                                ? null
+                                : _login,
                             style: FilledButton.styleFrom(
-                              backgroundColor: _managerPrimary,
+                              backgroundColor: managerPrimary,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 18),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(18),
                               ),
                             ),
-                            child: _isBusy
+                            child: sessionController.isAuthenticating
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
@@ -257,12 +239,12 @@ class _LoginFeatureChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _managerBorder),
+        border: Border.all(color: managerBorder),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: _managerPrimary),
+          Icon(icon, size: 18, color: managerPrimary),
           const SizedBox(width: 8),
           Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
         ],

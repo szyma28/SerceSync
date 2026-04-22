@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RolesGuard } from '../common/roles.guard';
 import { ManagerDashboardStreamModule } from '../manager-dashboard-stream/manager-dashboard-stream.module';
+import { MedicationsModule } from '../medications/medications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ManagerDashboardController } from './manager-dashboard.controller';
 import { ManagerIncidentsController } from './manager-incidents.controller';
@@ -11,7 +12,12 @@ import { ResidentsController } from './residents.controller';
 import { ResidentsService } from './residents.service';
 
 @Module({
-  imports: [AuthModule, PrismaModule, ManagerDashboardStreamModule],
+  imports: [
+    AuthModule,
+    PrismaModule,
+    ManagerDashboardStreamModule,
+    MedicationsModule,
+  ],
   controllers: [
     ResidentsController,
     ManagerDashboardController,

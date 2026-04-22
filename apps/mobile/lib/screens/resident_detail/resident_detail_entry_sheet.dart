@@ -1,9 +1,14 @@
 part of '../resident_detail_screen.dart';
 
 class _AddEntrySheet extends StatefulWidget {
-  const _AddEntrySheet({this.initialType, required this.onPickEvidence});
+  const _AddEntrySheet({
+    this.initialType,
+    required this.currentUserRole,
+    required this.onPickEvidence,
+  });
 
   final ResidentEntryType? initialType;
+  final AppUserRole currentUserRole;
   final Future<TimelineEvidenceFile?> Function() onPickEvidence;
 
   @override
@@ -13,19 +18,37 @@ class _AddEntrySheet extends StatefulWidget {
 class _AddEntrySheetState extends State<_AddEntrySheet> {
   late ResidentEntryType _selectedType;
   PersonalCareSubtype? _selectedPersonalCareSubtype;
+  MealType? _selectedMealType;
+  MealIntakeAmount? _selectedMealIntakeAmount;
   final _detailsController = TextEditingController();
   TimelineEvidenceFile? _evidence;
   bool _isPickingEvidence = false;
   String? _validationMessage;
+
+  bool get _hasStructuredMealLog =>
+      _selectedMealType != null && _selectedMealIntakeAmount != null;
+
+  bool get _hasPartialMealLog =>
+      (_selectedMealType == null) != (_selectedMealIntakeAmount == null);
+
+  List<ResidentEntryType> get _availableEntryTypes {
+    if (widget.currentUserRole == AppUserRole.nurse) {
+      return residentEntryTypesForNewNotes;
+    }
+
+    return residentEntryTypesForNewNotes
+        .where((type) => type != ResidentEntryType.medicationNote)
+        .toList();
+  }
 
   @override
   void initState() {
     super.initState();
     _selectedType =
         widget.initialType != null &&
-            residentEntryTypesForNewNotes.contains(widget.initialType)
+            _availableEntryTypes.contains(widget.initialType)
         ? widget.initialType!
-        : ResidentEntryType.personalCare;
+        : _availableEntryTypes.first;
   }
 
   @override
@@ -36,11 +59,6 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
 
   void _submit() {
     final details = _detailsController.text.trim();
-    if (details.isEmpty) {
-      setState(() => _validationMessage = 'Add a note before saving.');
-      return;
-    }
-
     if (_selectedType == ResidentEntryType.personalCare &&
         _selectedPersonalCareSubtype == null) {
       setState(() {
@@ -50,11 +68,32 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
       return;
     }
 
+    if (_selectedType == ResidentEntryType.nutritionHydration &&
+        _hasPartialMealLog) {
+      setState(() {
+        _validationMessage =
+            'Choose both meal type and amount eaten, or leave both blank.';
+      });
+      return;
+    }
+
+    if (details.isEmpty && !_hasStructuredMealLog) {
+      setState(() {
+        _validationMessage =
+            _selectedType == ResidentEntryType.nutritionHydration
+            ? 'Add a note or record the meal type and amount eaten before saving.'
+            : 'Add a note before saving.';
+      });
+      return;
+    }
+
     Navigator.of(context).pop(
       ResidentTimelineEntryDraft(
         type: _selectedType,
         details: details,
         personalCareSubtype: _selectedPersonalCareSubtype,
+        mealType: _selectedMealType,
+        mealIntakeAmount: _selectedMealIntakeAmount,
         evidence: _evidence,
       ),
     );
@@ -73,21 +112,38 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
     }
   }
 
+  DropdownButtonFormField<T> _buildEnumDropdown<T>({
+    required T? value,
+    required List<T> options,
+    required String labelText,
+    required String Function(T option) labelBuilder,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return DropdownButtonFormField<T>(
+      initialValue: value,
+      items: options
+          .map(
+            (option) => DropdownMenuItem<T>(
+              value: option,
+              child: Text(labelBuilder(option)),
+            ),
+          )
+          .toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(labelText: labelText),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return _ResidentSheetScaffold(
       title: 'Add note',
       children: [
-        DropdownButtonFormField<ResidentEntryType>(
-          initialValue: _selectedType,
-          items: residentEntryTypesForNewNotes
-              .map(
-                (type) => DropdownMenuItem<ResidentEntryType>(
-                  value: type,
-                  child: Text(type.label),
-                ),
-              )
-              .toList(),
+        _buildEnumDropdown<ResidentEntryType>(
+          value: _selectedType,
+          options: _availableEntryTypes,
+          labelText: 'Note type',
+          labelBuilder: (type) => type.label,
           onChanged: (value) {
             if (value == null) return;
             setState(() {
@@ -96,31 +152,54 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
               if (value != ResidentEntryType.personalCare) {
                 _selectedPersonalCareSubtype = null;
               }
+              if (value != ResidentEntryType.nutritionHydration) {
+                _selectedMealType = null;
+                _selectedMealIntakeAmount = null;
+              }
             });
           },
-          decoration: const InputDecoration(labelText: 'Note type'),
         ),
         if (_selectedType == ResidentEntryType.personalCare) ...[
           const SizedBox(height: 16),
-          DropdownButtonFormField<PersonalCareSubtype>(
-            initialValue: _selectedPersonalCareSubtype,
-            items: PersonalCareSubtype.values
-                .map(
-                  (subtype) => DropdownMenuItem<PersonalCareSubtype>(
-                    value: subtype,
-                    child: Text(subtype.label),
-                  ),
-                )
-                .toList(),
+          _buildEnumDropdown<PersonalCareSubtype>(
+            value: _selectedPersonalCareSubtype,
+            options: PersonalCareSubtype.values,
+            labelText: 'Personal care subtype',
+            labelBuilder: (subtype) => subtype.label,
             onChanged: (value) {
               setState(() {
                 _selectedPersonalCareSubtype = value;
                 _validationMessage = null;
               });
             },
-            decoration: const InputDecoration(
-              labelText: 'Personal care subtype',
-            ),
+          ),
+        ],
+        if (_selectedType == ResidentEntryType.nutritionHydration) ...[
+          const SizedBox(height: 16),
+          _buildEnumDropdown<MealType>(
+            value: _selectedMealType,
+            options: MealType.values,
+            labelText: 'Meal type',
+            labelBuilder: (mealType) => mealType.label,
+            onChanged: (value) {
+              setState(() {
+                _selectedMealType = value;
+                _validationMessage = null;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          _buildEnumDropdown<MealIntakeAmount>(
+            value: _selectedMealIntakeAmount,
+            options: MealIntakeAmount.values,
+            labelText: 'Amount eaten',
+            labelBuilder: (amount) => amount.label,
+            onChanged: (value) {
+              setState(() {
+                _selectedMealIntakeAmount = value;
+                _validationMessage = null;
+              });
+            },
           ),
         ],
         const SizedBox(height: 16),
@@ -132,8 +211,13 @@ class _AddEntrySheetState extends State<_AddEntrySheet> {
               setState(() => _validationMessage = null);
             }
           },
-          decoration: const InputDecoration(
-            labelText: 'Note',
+          decoration: InputDecoration(
+            labelText: _selectedType == ResidentEntryType.nutritionHydration
+                ? 'Note or concern'
+                : 'Note',
+            helperText: _selectedType == ResidentEntryType.nutritionHydration
+                ? 'Optional when meal type and amount eaten are recorded.'
+                : null,
             alignLabelWithHint: true,
           ),
         ),

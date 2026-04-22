@@ -1,72 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../api/api_client.dart';
-import '../models/handover.dart';
-import '../models/user.dart';
+import '../controllers/shift_workspace_controller.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/date_time_formatters.dart';
 
-class MyShiftScreen extends StatefulWidget {
-  const MyShiftScreen({
-    super.key,
-    required this.user,
-    required this.snapshot,
-    required this.apiClient,
-    required this.accessToken,
-    required this.onLogout,
-  });
+class MyShiftScreen extends StatelessWidget {
+  const MyShiftScreen({super.key, required this.onLogout});
 
-  final LoginUser user;
-  final HandoverSnapshot snapshot;
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
   final VoidCallback onLogout;
 
   @override
-  State<MyShiftScreen> createState() => _MyShiftScreenState();
-}
-
-class _MyShiftScreenState extends State<MyShiftScreen> {
-  ShiftOverview? _overview;
-  bool _isLoading = true;
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadShiftOverview();
-  }
-
-  Future<void> _loadShiftOverview() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final overview = await widget.apiClient.getShiftOverview(
-        accessToken: widget.accessToken,
-      );
-      if (!mounted) return;
-      setState(() {
-        _overview = overview;
-        _errorMessage = null;
-      });
-    } on ApiException catch (error) {
-      if (!mounted) return;
-      setState(() => _errorMessage = error.message);
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final currentShift = _overview?.currentShift;
-    final assignments = _overview?.assignments ?? const <ShiftAssignment>[];
+    final workspaceController = context.watch<ShiftWorkspaceController>();
+    final currentShift = workspaceController.currentShift;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -77,14 +25,19 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: _isLoading ? null : _loadShiftOverview,
+            onPressed: workspaceController.isOverviewLoading
+                ? null
+                : () => context
+                      .read<ShiftWorkspaceController>()
+                      .refreshOverview(),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _loadShiftOverview,
+          onRefresh: () =>
+              context.read<ShiftWorkspaceController>().refreshOverview(),
           color: AppTheme.primaryBlue,
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
@@ -94,28 +47,40 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _InfoRow(label: 'Carer', value: widget.user.displayName),
-                    _InfoRow(label: 'Role', value: widget.user.role.label),
+                    _InfoRow(
+                      label: 'Carer',
+                      value: workspaceController.currentCarerName,
+                    ),
+                    _InfoRow(
+                      label: 'Role',
+                      value: workspaceController.currentUserRole.label,
+                    ),
                     _InfoRow(
                       label: 'Assignment',
                       value: currentShift != null
                           ? '${currentShift.unitLabel} · Floor ${currentShift.floorNumber}'
-                          : '${widget.snapshot.shift.unitLabel} · Floor ${widget.snapshot.shift.floorNumber}',
+                          : '${workspaceController.snapshot.shift.unitLabel} · Floor ${workspaceController.snapshot.shift.floorNumber}',
                     ),
                     _InfoRow(
                       label: 'Shift',
                       value: currentShift != null
-                          ? '${formatHourMinute(currentShift.startsAt)} - ${formatHourMinute(currentShift.endsAt)}'
-                          : '${formatHourMinute(widget.snapshot.shift.startsAt)} - ${formatHourMinute(widget.snapshot.shift.endsAt)}',
+                          ? formatHourMinuteRange(
+                              currentShift.startsAt,
+                              currentShift.endsAt,
+                            )
+                          : formatHourMinuteRange(
+                              workspaceController.snapshot.shift.startsAt,
+                              workspaceController.snapshot.shift.endsAt,
+                            ),
                     ),
                     _InfoRow(
                       label: 'Handover',
-                      value: _handoverValue(currentShift),
+                      value: _handoverValue(workspaceController, currentShift),
                     ),
-                    if (_errorMessage != null) ...[
+                    if (workspaceController.overviewErrorMessage != null) ...[
                       const SizedBox(height: 8),
                       Text(
-                        _errorMessage!,
+                        workspaceController.overviewErrorMessage!,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppTheme.errorRed,
                           fontWeight: FontWeight.w700,
@@ -125,15 +90,34 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
-              _SectionCard(
-                title: 'Upcoming shifts',
-                child: _AssignmentsList(
-                  isLoading: _isLoading,
-                  assignments: assignments,
-                  fallbackShift: widget.snapshot.shift,
+              if (workspaceController.currentUserRole == AppUserRole.nurse) ...[
+                const SizedBox(height: 14),
+                _SectionCard(
+                  title: 'Medication Safety',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _MedicationSummaryPanel(
+                        summary:
+                            workspaceController.overview?.medicationSummary ??
+                            const MedicationTaskSummary(),
+                        isLoading:
+                            workspaceController.isOverviewLoading &&
+                            workspaceController.overview == null,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Use Priorities to open the shift medication round and see what needs recording now.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 14),
               _SectionCard(
                 title: 'Settings',
@@ -163,7 +147,7 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
                       ),
                       title: const Text('Log Out'),
                       subtitle: const Text('Back to sign in.'),
-                      onTap: widget.onLogout,
+                      onTap: onLogout,
                     ),
                   ],
                 ),
@@ -175,7 +159,10 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
     );
   }
 
-  String _handoverValue(ShiftAssignment? currentShift) {
+  String _handoverValue(
+    ShiftWorkspaceController workspaceController,
+    ShiftAssignment? currentShift,
+  ) {
     if (currentShift != null) {
       if (currentShift.handoverAcknowledged) {
         return 'Acknowledged at ${formatHourMinute(currentShift.handoverAcknowledgedAt ?? currentShift.startsAt)}';
@@ -183,26 +170,24 @@ class _MyShiftScreenState extends State<MyShiftScreen> {
       return 'Pending acknowledgement';
     }
 
-    return widget.snapshot.acknowledged
-        ? 'Acknowledged at ${formatHourMinute(widget.snapshot.acknowledgedAt ?? widget.snapshot.shift.startsAt)}'
+    return workspaceController.snapshot.acknowledged
+        ? 'Acknowledged at ${formatHourMinute(workspaceController.snapshot.acknowledgedAt ?? workspaceController.snapshot.shift.startsAt)}'
         : 'Pending acknowledgement';
   }
 }
 
-class _AssignmentsList extends StatelessWidget {
-  const _AssignmentsList({
+class _MedicationSummaryPanel extends StatelessWidget {
+  const _MedicationSummaryPanel({
+    required this.summary,
     required this.isLoading,
-    required this.assignments,
-    required this.fallbackShift,
   });
 
+  final MedicationTaskSummary summary;
   final bool isLoading;
-  final List<ShiftAssignment> assignments;
-  final ShiftSummary fallbackShift;
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading && assignments.isEmpty) {
+    if (isLoading) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.symmetric(vertical: 12),
@@ -211,97 +196,134 @@ class _AssignmentsList extends StatelessWidget {
       );
     }
 
-    final visibleAssignments = assignments.isEmpty
-        ? [
-            ShiftAssignment(
-              id: fallbackShift.id,
-              name: fallbackShift.name,
-              startsAt: fallbackShift.startsAt,
-              endsAt: fallbackShift.endsAt,
-              status: fallbackShift.status,
-              floorNumber: fallbackShift.floorNumber,
-              unitLabel: fallbackShift.unitLabel,
-            ),
-          ]
-        : assignments;
+    if (!summary.hasActiveMedicationTasks) {
+      return Text(
+        'No active medication tasks on this shift right now.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+      );
+    }
 
     return Column(
-      children: visibleAssignments
-          .map(
-            (entry) => Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceBackground,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.borderLight),
-              ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          summary.headline ?? 'Medication tasks need active monitoring.',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(color: AppTheme.primaryBlueDark),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _MedicationMetricChip(
+              label: 'Open meds',
+              value: summary.total,
+              foreground: AppTheme.primaryBlueDark,
+              background: AppTheme.primaryBlueLight,
+            ),
+            _MedicationMetricChip(
+              label: 'Overdue',
+              value: summary.overdue,
+              foreground: AppTheme.errorRed,
+              background: AppTheme.errorRed.withAlpha(14),
+            ),
+            _MedicationMetricChip(
+              label: 'Next hour',
+              value: summary.dueWithinHour,
+              foreground: const Color(0xFF9A6700),
+              background: AppTheme.warningYellow.withAlpha(26),
+            ),
+            _MedicationMetricChip(
+              label: 'High priority',
+              value: summary.highPriority,
+              foreground: AppTheme.errorRed,
+              background: AppTheme.errorRed.withAlpha(10),
+            ),
+          ],
+        ),
+        if (summary.warnings.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          ...summary.warnings.map(
+            (warning) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: entry.status == ShiftStatus.active
-                          ? AppTheme.primaryBlueLight
-                          : const Color(0xFFE8EEF5),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
                     child: Icon(
-                      entry.status == ShiftStatus.active
-                          ? Icons.play_circle_outline_rounded
-                          : Icons.calendar_month_outlined,
-                      color: AppTheme.primaryBlueDark,
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: AppTheme.errorRed,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          entry.name,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${_assignmentLabel(entry)} · ${entry.unitLabel} · Floor ${entry.floorNumber}',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '${formatHourMinute(entry.startsAt)} - ${formatHourMinute(entry.endsAt)} · ${entry.status.label}',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: AppTheme.textSecondary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ],
+                    child: Text(
+                      warning,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          )
-          .toList(),
+          ),
+        ],
+      ],
     );
   }
+}
 
-  String _assignmentLabel(ShiftAssignment assignment) {
-    final now = DateTime.now();
-    final startDay = DateTime(
-      assignment.startsAt.year,
-      assignment.startsAt.month,
-      assignment.startsAt.day,
+class _MedicationMetricChip extends StatelessWidget {
+  const _MedicationMetricChip({
+    required this.label,
+    required this.value,
+    required this.foreground,
+    required this.background,
+  });
+
+  final String label;
+  final int value;
+  final Color foreground;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$value',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
-
-    if (startDay == today) return 'Today';
-    if (startDay == tomorrow) return 'Tomorrow';
-    return 'Next Scheduled';
   }
 }
 

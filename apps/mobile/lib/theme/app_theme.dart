@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Sophisticated medical teal
   static const primaryBlue = Color(0xFF0D9488);
   static const primaryBlueLight = Color(0xFFCCFBF1);
   static const primaryBlueDark = Color(0xFF0F766E);
@@ -18,7 +17,6 @@ class AppTheme {
   static const textPrimary = Color(0xFF0F172A);
   static const textSecondary = Color(0xFF64748B);
 
-  // Deep, color-tinted premium shadow (much more elegant than gray drops)
   static List<BoxShadow> get premiumShadow => [
     BoxShadow(
       color: primaryBlueDark.withAlpha(15),
@@ -34,16 +32,11 @@ class AppTheme {
     ),
   ];
 
-  // Atmospheric background used behind the Scaffold
   static BoxDecoration get atmosphericBackground => const BoxDecoration(
     gradient: LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
-      colors: [
-        Color(0xFFE0F2FE), // Soft glowing sky blue mesh
-        Color(0xFFF8FAFC), // Fades quickly to solid neat background
-        Color(0xFFF8FAFC),
-      ],
+      colors: [Color(0xFFE0F2FE), Color(0xFFF8FAFC), Color(0xFFF8FAFC)],
       stops: [0.0, 0.35, 1.0],
     ),
   );
@@ -58,12 +51,11 @@ class AppTheme {
         onSurface: textPrimary,
         error: errorRed,
       ),
-      scaffoldBackgroundColor: Colors
-          .transparent, // Allow underlying gradient to show through scaffolds if we wrap them
+      scaffoldBackgroundColor: Colors.transparent,
       textTheme: baseTextTheme.copyWith(
         headlineMedium: baseTextTheme.headlineMedium?.copyWith(
           color: textPrimary,
-          fontWeight: FontWeight.w800, // Punchier
+          fontWeight: FontWeight.w800,
           letterSpacing: -0.8,
         ),
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
@@ -99,9 +91,7 @@ class AppTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(
-            color: Colors.transparent,
-          ), // Removing borders completely to rely on shadows
+          side: const BorderSide(color: Colors.transparent),
         ),
         margin: EdgeInsets.zero,
       ),
@@ -110,8 +100,7 @@ class AppTheme {
             FilledButton.styleFrom(
               backgroundColor: primaryBlue,
               foregroundColor: Colors.white,
-              elevation:
-                  0, // Keep flat natively, we use Container overlays if needed
+              elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -128,7 +117,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: textPrimary,
-          side: const BorderSide(color: borderLight, width: 2), // Bolder border
+          side: const BorderSide(color: borderLight, width: 2),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -136,7 +125,6 @@ class AppTheme {
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
-      // Soft, borderless input fields
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,

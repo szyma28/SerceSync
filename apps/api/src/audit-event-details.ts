@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type {
+  MealIntakeAmount,
+  MealType,
   IncidentCategory,
   IncidentSeverity,
   IncidentStatus,
@@ -16,6 +18,8 @@ export interface AuditEventDetails {
   entryType?: ResidentTimelineEntryType;
   entryTitle?: string;
   personalCareSubtype?: PersonalCareSubtype | null;
+  mealType?: MealType | null;
+  mealIntakeAmount?: MealIntakeAmount | null;
   mediaAttached?: boolean;
   mediaType?: string;
   originalFileName?: string;

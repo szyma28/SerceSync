@@ -128,34 +128,96 @@ extension PersonalCareSubtypeX on PersonalCareSubtype {
   }
 }
 
-enum IncidentSeverity { amber, red }
+enum MealType { breakfast, lunch, dinner, snack }
 
-extension IncidentSeverityX on IncidentSeverity {
+extension MealTypeX on MealType {
   String get apiValue {
     switch (this) {
-      case IncidentSeverity.amber:
-        return 'AMBER';
-      case IncidentSeverity.red:
-        return 'RED';
+      case MealType.breakfast:
+        return 'BREAKFAST';
+      case MealType.lunch:
+        return 'LUNCH';
+      case MealType.dinner:
+        return 'DINNER';
+      case MealType.snack:
+        return 'SNACK';
     }
   }
 
   String get label {
     switch (this) {
-      case IncidentSeverity.amber:
-        return 'Amber';
-      case IncidentSeverity.red:
-        return 'Red';
+      case MealType.breakfast:
+        return 'Breakfast';
+      case MealType.lunch:
+        return 'Lunch';
+      case MealType.dinner:
+        return 'Dinner';
+      case MealType.snack:
+        return 'Snack';
     }
   }
 
-  static IncidentSeverity fromApiValue(String value) {
+  static MealType fromApiValue(String value) {
     switch (value) {
-      case 'RED':
-        return IncidentSeverity.red;
-      case 'AMBER':
+      case 'LUNCH':
+        return MealType.lunch;
+      case 'DINNER':
+        return MealType.dinner;
+      case 'SNACK':
+        return MealType.snack;
+      case 'BREAKFAST':
       default:
-        return IncidentSeverity.amber;
+        return MealType.breakfast;
+    }
+  }
+}
+
+enum MealIntakeAmount { none, quarter, half, most, all }
+
+extension MealIntakeAmountX on MealIntakeAmount {
+  String get apiValue {
+    switch (this) {
+      case MealIntakeAmount.none:
+        return 'NONE';
+      case MealIntakeAmount.quarter:
+        return 'QUARTER';
+      case MealIntakeAmount.half:
+        return 'HALF';
+      case MealIntakeAmount.most:
+        return 'MOST';
+      case MealIntakeAmount.all:
+        return 'ALL';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case MealIntakeAmount.none:
+        return 'None eaten';
+      case MealIntakeAmount.quarter:
+        return 'Quarter eaten';
+      case MealIntakeAmount.half:
+        return 'Half eaten';
+      case MealIntakeAmount.most:
+        return 'Most eaten';
+      case MealIntakeAmount.all:
+        return 'All eaten';
+    }
+  }
+
+  static MealIntakeAmount fromApiValue(String value) {
+    switch (value) {
+      case 'QUARTER':
+        return MealIntakeAmount.quarter;
+      case 'HALF':
+        return MealIntakeAmount.half;
+      case 'MOST':
+        return MealIntakeAmount.most;
+      case 'ALL':
+        return MealIntakeAmount.all;
+      case 'NONE':
+      default:
+        return MealIntakeAmount.none;
     }
   }
 }
@@ -259,6 +321,7 @@ class PriorityItem {
     required this.room,
     required this.status,
     required this.residentId,
+    this.opensMedicationRound = false,
     this.sourceTask,
   });
 
@@ -332,6 +395,153 @@ class PriorityItem {
     );
   }
 
+  factory PriorityItem.fromMedicationResidentSummary(
+    MedicationResidentOperationalSummary residentSummary,
+    DateTime now,
+  ) {
+    final resident = residentSummary.resident;
+    final openDoses = residentSummary.openDoses;
+    final exceptions = residentSummary.exceptions;
+    final overdueCount = openDoses.overdue;
+    final dueSoonCount = openDoses.dueWithinHour;
+    final exceptionCount = exceptions.total;
+
+    final hasOverdue = overdueCount > 0;
+    final hasExceptions = exceptionCount > 0;
+    final isDueSoon = dueSoonCount > 0;
+    final nextDueAt = openDoses.nextDueAt;
+
+    final band = hasOverdue || hasExceptions
+        ? PriorityBand.urgentNow
+        : isDueSoon
+        ? PriorityBand.dueWithinHour
+        : PriorityBand.reminders;
+
+    final syntheticTask = ShiftTask(
+      id: 'med-priority-${resident.id}-${band.name}',
+      title: hasOverdue
+          ? 'Medication round overdue'
+          : hasExceptions
+          ? 'Medication variance recorded'
+          : isDueSoon
+          ? 'Medication due soon'
+          : 'Medication later this shift',
+      description: _buildMedicationResidentSummary(residentSummary, band),
+      dueAt: nextDueAt,
+      status: hasOverdue || hasExceptions
+          ? TaskStatus.overdue
+          : TaskStatus.pending,
+      focus: TaskFocus.medication,
+      clinicalPriority: hasOverdue
+          ? TaskClinicalPriority.timeCritical
+          : hasExceptions ||
+                residentSummary.taskSummaryCompatible.highPriority > 0
+          ? TaskClinicalPriority.priority
+          : TaskClinicalPriority.routine,
+      residentId: resident.id,
+      residentName: resident.fullName,
+      room: resident.roomLabel,
+      canComplete: false,
+      canDefer: false,
+      canEscalate: false,
+      actionRestrictionReason:
+          'Open the shift medication round to record outcomes.',
+    );
+
+    final nextDueDifference = nextDueAt?.difference(now);
+    final timeStateLabel = hasOverdue
+        ? '$overdueCount overdue now'
+        : hasExceptions
+        ? '$exceptionCount exception${exceptionCount == 1 ? '' : 's'} open'
+        : nextDueDifference != null &&
+              band == PriorityBand.dueWithinHour &&
+              !nextDueDifference.isNegative
+        ? _formatDueSoonLabel(nextDueDifference)
+        : nextDueDifference != null &&
+              band == PriorityBand.reminders &&
+              !nextDueDifference.isNegative
+        ? _formatReminderLabel(nextDueDifference)
+        : band == PriorityBand.dueWithinHour
+        ? '$dueSoonCount due within 1 hr'
+        : 'Later this shift';
+
+    return PriorityItem(
+      id: syntheticTask.id,
+      title: syntheticTask.title,
+      summary: syntheticTask.description ?? 'Medication attention is needed.',
+      band: band,
+      timeStateLabel: timeStateLabel,
+      residentName: resident.fullName,
+      room: resident.roomLabel,
+      status: syntheticTask.status,
+      residentId: resident.id,
+      opensMedicationRound: true,
+      sourceTask: syntheticTask,
+    );
+  }
+
+  static String _buildMedicationResidentSummary(
+    MedicationResidentOperationalSummary residentSummary,
+    PriorityBand band,
+  ) {
+    final resident = residentSummary.resident;
+    final openDoses = residentSummary.openDoses;
+    final exceptions = residentSummary.exceptions;
+    final summaryParts = <String>[];
+
+    if (band == PriorityBand.urgentNow && openDoses.overdue > 0) {
+      summaryParts.add(
+        '${resident.fullName} has ${openDoses.overdue} overdue medication${openDoses.overdue == 1 ? '' : 's'} to review.',
+      );
+    } else if (band == PriorityBand.urgentNow && exceptions.total > 0) {
+      summaryParts.add(
+        'Review ${resident.fullName}: ${_formatMedicationExceptionSummary(exceptions)}.',
+      );
+    } else if (band == PriorityBand.dueWithinHour) {
+      summaryParts.add(
+        '${resident.fullName} has ${openDoses.dueWithinHour} medication${openDoses.dueWithinHour == 1 ? '' : 's'} due within the next hour.',
+      );
+    } else {
+      summaryParts.add(
+        '${resident.fullName} still has ${openDoses.due} medication${openDoses.due == 1 ? '' : 's'} due later this shift.',
+      );
+    }
+
+    if (exceptions.total > 0 && band != PriorityBand.urgentNow) {
+      summaryParts.add(_formatMedicationExceptionSummary(exceptions));
+    }
+
+    return summaryParts.join(' ');
+  }
+
+  static String _formatMedicationExceptionSummary(
+    MedicationOperationalExceptionSummary exceptions,
+  ) {
+    final parts = <String>[];
+
+    if (exceptions.refused > 0) {
+      parts.add('${exceptions.refused} refused');
+    }
+    if (exceptions.omitted > 0) {
+      parts.add('${exceptions.omitted} omitted');
+    }
+    if (exceptions.delayed > 0) {
+      parts.add('${exceptions.delayed} delayed');
+    }
+    if (exceptions.notAvailable > 0) {
+      parts.add('${exceptions.notAvailable} not available');
+    }
+    if (exceptions.held > 0) {
+      parts.add('${exceptions.held} held');
+    }
+
+    if (parts.isEmpty) {
+      return 'Medication variance needs review';
+    }
+
+    return parts.join(' · ');
+  }
+
   static String _formatDueSoonLabel(Duration difference) {
     if (difference.inMinutes <= 1) return 'Due in under a minute';
     return 'Due in ${difference.inMinutes} min';
@@ -363,6 +573,7 @@ class PriorityItem {
   final String room;
   final TaskStatus status;
   final String? residentId;
+  final bool opensMedicationRound;
   final ShiftTask? sourceTask;
 }
 
@@ -374,6 +585,7 @@ class ResidentListItem extends ResidentProfile {
     required super.floorNumber,
     required super.unitLabel,
     required super.recognitionImageKey,
+    required super.aboutMe,
     required super.todaySummary,
     required super.assignmentContext,
     required super.contextLine,
@@ -392,6 +604,7 @@ class ResidentListItem extends ResidentProfile {
       floorNumber: json['floorNumber'] as int,
       unitLabel: json['unitLabel'] as String,
       recognitionImageKey: json['recognitionImageKey'] as String,
+      aboutMe: (json['aboutMe'] as String?) ?? '',
       todaySummary: json['todaySummary'] as String,
       assignmentContext: json['assignmentContext'] as String,
       contextLine: json['contextLine'] as String,
@@ -422,6 +635,8 @@ class ResidentTimelineEntry {
     required this.timestamp,
     required this.media,
     this.personalCareSubtype,
+    this.mealType,
+    this.mealIntakeAmount,
   });
 
   factory ResidentTimelineEntry.fromJson(Map<String, dynamic> json) {
@@ -433,6 +648,12 @@ class ResidentTimelineEntry {
           : PersonalCareSubtypeX.fromApiValue(
               json['personalCareSubtype'] as String,
             ),
+      mealType: json['mealType'] == null
+          ? null
+          : MealTypeX.fromApiValue(json['mealType'] as String),
+      mealIntakeAmount: json['mealIntakeAmount'] == null
+          ? null
+          : MealIntakeAmountX.fromApiValue(json['mealIntakeAmount'] as String),
       title: json['title'] as String,
       details: json['details'] as String,
       authorName: json['authorName'] as String,
@@ -450,11 +671,197 @@ class ResidentTimelineEntry {
   final String id;
   final ResidentEntryType type;
   final PersonalCareSubtype? personalCareSubtype;
+  final MealType? mealType;
+  final MealIntakeAmount? mealIntakeAmount;
   final String title;
   final String details;
   final String authorName;
   final DateTime timestamp;
   final List<ResidentTimelineMediaItem> media;
+}
+
+class MedicationTaskSummary {
+  const MedicationTaskSummary({
+    this.total = 0,
+    this.overdue = 0,
+    this.dueWithinHour = 0,
+    this.highPriority = 0,
+    this.headline,
+    this.warnings = const [],
+  });
+
+  factory MedicationTaskSummary.fromJson(Map<String, dynamic> json) {
+    return MedicationTaskSummary(
+      total: json['total'] as int? ?? 0,
+      overdue: json['overdue'] as int? ?? 0,
+      dueWithinHour: json['dueWithinHour'] as int? ?? 0,
+      highPriority: json['highPriority'] as int? ?? 0,
+      headline: json['headline'] as String?,
+      warnings: (json['warnings'] as List<dynamic>? ?? const [])
+          .map((entry) => entry as String)
+          .toList(),
+    );
+  }
+
+  final int total;
+  final int overdue;
+  final int dueWithinHour;
+  final int highPriority;
+  final String? headline;
+  final List<String> warnings;
+
+  bool get hasActiveMedicationTasks => total > 0;
+}
+
+class MedicationOperationalResidentIdentity {
+  const MedicationOperationalResidentIdentity({
+    required this.id,
+    required this.fullName,
+    required this.roomLabel,
+    required this.floorNumber,
+    required this.unitLabel,
+  });
+
+  factory MedicationOperationalResidentIdentity.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return MedicationOperationalResidentIdentity(
+      id: json['id'] as String,
+      fullName: json['fullName'] as String,
+      roomLabel: json['roomLabel'] as String,
+      floorNumber: json['floorNumber'] as int,
+      unitLabel: json['unitLabel'] as String,
+    );
+  }
+
+  final String id;
+  final String fullName;
+  final String roomLabel;
+  final int floorNumber;
+  final String unitLabel;
+}
+
+class MedicationOperationalOpenDoseSummary {
+  const MedicationOperationalOpenDoseSummary({
+    this.due = 0,
+    this.overdue = 0,
+    this.dueWithinHour = 0,
+    this.nextDueAt,
+  });
+
+  factory MedicationOperationalOpenDoseSummary.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return MedicationOperationalOpenDoseSummary(
+      due: json['due'] as int? ?? 0,
+      overdue: json['overdue'] as int? ?? 0,
+      dueWithinHour: json['dueWithinHour'] as int? ?? 0,
+      nextDueAt: json['nextDueAt'] == null
+          ? null
+          : parseApiDateTime(json['nextDueAt'] as String),
+    );
+  }
+
+  final int due;
+  final int overdue;
+  final int dueWithinHour;
+  final DateTime? nextDueAt;
+}
+
+class MedicationOperationalExceptionSummary {
+  const MedicationOperationalExceptionSummary({
+    this.refused = 0,
+    this.omitted = 0,
+    this.delayed = 0,
+    this.notAvailable = 0,
+    this.held = 0,
+    this.total = 0,
+  });
+
+  factory MedicationOperationalExceptionSummary.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return MedicationOperationalExceptionSummary(
+      refused: json['refused'] as int? ?? 0,
+      omitted: json['omitted'] as int? ?? 0,
+      delayed: json['delayed'] as int? ?? 0,
+      notAvailable: json['notAvailable'] as int? ?? 0,
+      held: json['held'] as int? ?? 0,
+      total: json['total'] as int? ?? 0,
+    );
+  }
+
+  final int refused;
+  final int omitted;
+  final int delayed;
+  final int notAvailable;
+  final int held;
+  final int total;
+}
+
+class MedicationResidentOperationalSummary {
+  const MedicationResidentOperationalSummary({
+    required this.resident,
+    this.taskSummaryCompatible = const MedicationTaskSummary(),
+    this.openDoses = const MedicationOperationalOpenDoseSummary(),
+    this.exceptions = const MedicationOperationalExceptionSummary(),
+  });
+
+  factory MedicationResidentOperationalSummary.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return MedicationResidentOperationalSummary(
+      resident: MedicationOperationalResidentIdentity.fromJson(
+        json['resident'] as Map<String, dynamic>,
+      ),
+      taskSummaryCompatible: json['taskSummaryCompatible'] == null
+          ? const MedicationTaskSummary()
+          : MedicationTaskSummary.fromJson(
+              json['taskSummaryCompatible'] as Map<String, dynamic>,
+            ),
+      openDoses: json['openDoses'] == null
+          ? const MedicationOperationalOpenDoseSummary()
+          : MedicationOperationalOpenDoseSummary.fromJson(
+              json['openDoses'] as Map<String, dynamic>,
+            ),
+      exceptions: json['exceptions'] == null
+          ? const MedicationOperationalExceptionSummary()
+          : MedicationOperationalExceptionSummary.fromJson(
+              json['exceptions'] as Map<String, dynamic>,
+            ),
+    );
+  }
+
+  final MedicationOperationalResidentIdentity resident;
+  final MedicationTaskSummary taskSummaryCompatible;
+  final MedicationOperationalOpenDoseSummary openDoses;
+  final MedicationOperationalExceptionSummary exceptions;
+
+  bool get hasSignal =>
+      openDoses.due > 0 ||
+      openDoses.overdue > 0 ||
+      openDoses.dueWithinHour > 0 ||
+      exceptions.total > 0;
+}
+
+class MedicationShiftOperationalSummary {
+  const MedicationShiftOperationalSummary({this.residents = const []});
+
+  factory MedicationShiftOperationalSummary.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return MedicationShiftOperationalSummary(
+      residents: (json['residents'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => MedicationResidentOperationalSummary.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  final List<MedicationResidentOperationalSummary> residents;
 }
 
 class ResidentTimelineMediaItem {
@@ -598,10 +1005,16 @@ class ResidentTaskSummary extends TaskRecord {
     required super.title,
     super.description,
     required super.status,
+    super.focus,
+    super.clinicalPriority,
     super.dueAt,
     super.residentId,
     super.residentName,
     super.room,
+    super.canComplete,
+    super.canDefer,
+    super.canEscalate,
+    super.actionRestrictionReason,
   });
 
   factory ResidentTaskSummary.fromJson(Map<String, dynamic> json) {
@@ -609,6 +1022,14 @@ class ResidentTaskSummary extends TaskRecord {
       id: json['id'] as String,
       title: json['title'] as String,
       description: json['description'] as String?,
+      focus: json['focus'] == null
+          ? TaskFocus.general
+          : TaskFocusX.fromApiValue(json['focus'] as String),
+      clinicalPriority: json['clinicalPriority'] == null
+          ? TaskClinicalPriority.routine
+          : TaskClinicalPriorityX.fromApiValue(
+              json['clinicalPriority'] as String,
+            ),
       status: TaskStatusX.fromApiValue(json['status'] as String),
       dueAt: json['dueAt'] == null
           ? null
@@ -616,6 +1037,10 @@ class ResidentTaskSummary extends TaskRecord {
       residentId: json['residentId'] as String?,
       residentName: json['residentName'] as String?,
       room: json['room'] as String?,
+      canComplete: json['canComplete'] as bool?,
+      canDefer: json['canDefer'] as bool?,
+      canEscalate: json['canEscalate'] as bool?,
+      actionRestrictionReason: json['actionRestrictionReason'] as String?,
     );
   }
 }
@@ -632,10 +1057,12 @@ class ResidentDetail extends ResidentProfile {
     required super.assignmentContext,
     required super.contextLine,
     required super.alerts,
+    required super.aboutMe,
     required super.baselinePriority,
     required super.effectivePriority,
     required super.prioritySource,
     required super.activeIncidentCount,
+    this.medicationSummary = const MedicationTaskSummary(),
     required this.activeIncidents,
     required this.currentTasks,
     required this.timeline,
@@ -652,6 +1079,7 @@ class ResidentDetail extends ResidentProfile {
       todaySummary: json['todaySummary'] as String,
       assignmentContext: json['assignmentContext'] as String,
       contextLine: json['contextLine'] as String,
+      aboutMe: (json['aboutMe'] as String?) ?? '',
       alerts: (json['alerts'] as List<dynamic>? ?? const [])
           .map((alert) => alert as String)
           .toList(),
@@ -665,6 +1093,11 @@ class ResidentDetail extends ResidentProfile {
         json['prioritySource'] as String,
       ),
       activeIncidentCount: json['activeIncidentCount'] as int? ?? 0,
+      medicationSummary: json['medicationSummary'] == null
+          ? const MedicationTaskSummary()
+          : MedicationTaskSummary.fromJson(
+              json['medicationSummary'] as Map<String, dynamic>,
+            ),
       activeIncidents: (json['activeIncidents'] as List<dynamic>? ?? const [])
           .map(
             (incident) =>
@@ -686,6 +1119,7 @@ class ResidentDetail extends ResidentProfile {
     );
   }
 
+  final MedicationTaskSummary medicationSummary;
   final List<ResidentIncident> activeIncidents;
   final List<ResidentTaskSummary> currentTasks;
   final List<ResidentTimelineEntry> timeline;
@@ -696,12 +1130,16 @@ class ResidentTimelineEntryDraft {
     required this.type,
     required this.details,
     this.personalCareSubtype,
+    this.mealType,
+    this.mealIntakeAmount,
     this.evidence,
   });
 
   final ResidentEntryType type;
   final String details;
   final PersonalCareSubtype? personalCareSubtype;
+  final MealType? mealType;
+  final MealIntakeAmount? mealIntakeAmount;
   final TimelineEvidenceFile? evidence;
 
   Map<String, dynamic> toJson() {
@@ -710,6 +1148,9 @@ class ResidentTimelineEntryDraft {
       'details': details,
       if (personalCareSubtype != null)
         'personalCareSubtype': personalCareSubtype!.apiValue,
+      if (mealType != null) 'mealType': mealType!.apiValue,
+      if (mealIntakeAmount != null)
+        'mealIntakeAmount': mealIntakeAmount!.apiValue,
     };
   }
 }
@@ -772,7 +1213,11 @@ class ShiftAssignment extends ShiftPeriod {
 }
 
 class ShiftOverview {
-  const ShiftOverview({required this.currentShift, required this.assignments});
+  const ShiftOverview({
+    required this.currentShift,
+    this.medicationSummary = const MedicationTaskSummary(),
+    this.medicationOperationalSummary,
+  });
 
   factory ShiftOverview.fromJson(Map<String, dynamic> json) {
     return ShiftOverview(
@@ -781,16 +1226,22 @@ class ShiftOverview {
           : ShiftAssignment.fromJson(
               json['currentShift'] as Map<String, dynamic>,
             ),
-      assignments: (json['assignments'] as List<dynamic>? ?? const [])
-          .map(
-            (entry) => ShiftAssignment.fromJson(entry as Map<String, dynamic>),
-          )
-          .toList(),
+      medicationSummary: json['medicationSummary'] == null
+          ? const MedicationTaskSummary()
+          : MedicationTaskSummary.fromJson(
+              json['medicationSummary'] as Map<String, dynamic>,
+            ),
+      medicationOperationalSummary: json['medicationOperationalSummary'] == null
+          ? null
+          : MedicationShiftOperationalSummary.fromJson(
+              json['medicationOperationalSummary'] as Map<String, dynamic>,
+            ),
     );
   }
 
   final ShiftAssignment? currentShift;
-  final List<ShiftAssignment> assignments;
+  final MedicationTaskSummary medicationSummary;
+  final MedicationShiftOperationalSummary? medicationOperationalSummary;
 }
 
 class ShiftRotaEntry {

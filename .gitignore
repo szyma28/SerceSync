@@ -45,3 +45,4 @@ build/
 
 # Local runtime state
 .run/
+.codex-smoke/

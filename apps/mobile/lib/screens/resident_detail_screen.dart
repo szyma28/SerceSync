@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api/api_client.dart';
+import '../models/handover.dart';
+import '../models/medication_models.dart';
 import '../models/workspace_models.dart';
+import 'medication_round_screen.dart';
 import '../theme/app_theme.dart';
-import '../widgets/resident_priority_badge.dart';
 import '../widgets/screen_message_state.dart';
 import '../widgets/date_time_formatters.dart';
 
@@ -17,6 +19,7 @@ part 'resident_detail/resident_detail_timeline.dart';
 part 'resident_detail/resident_detail_sheet_widgets.dart';
 part 'resident_detail/resident_detail_entry_sheet.dart';
 part 'resident_detail/resident_detail_incident_sheet.dart';
+part 'resident_detail/resident_detail_medication.dart';
 
 class ResidentDetailScreen extends StatefulWidget {
   const ResidentDetailScreen({
@@ -25,6 +28,7 @@ class ResidentDetailScreen extends StatefulWidget {
     required this.apiClient,
     required this.accessToken,
     required this.currentCarerName,
+    required this.currentUserRole,
     this.highlightTaskId,
   });
 
@@ -32,6 +36,7 @@ class ResidentDetailScreen extends StatefulWidget {
   final SerceSyncApiClient apiClient;
   final String accessToken;
   final String currentCarerName;
+  final AppUserRole currentUserRole;
   final String? highlightTaskId;
 
   @override
@@ -50,9 +55,22 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
   String? _taskBeingUpdatedId;
   String? _activeHighlightTaskId;
   String? _errorMessage;
+  String? _emarErrorMessage;
   final Set<String> _collapsingTaskIds = <String>{};
   final Set<String> _successStateTaskIds = <String>{};
   bool _noteSaveConfirmed = false;
+  ResidentEmarProfile? _emarProfile;
+  HandoverSnapshot? _handoverSnapshot;
+
+  bool get _canViewMedicationContent =>
+      widget.currentUserRole == AppUserRole.nurse ||
+      widget.currentUserRole == AppUserRole.manager;
+
+  bool get _canRecordMedicationAdministration =>
+      widget.currentUserRole == AppUserRole.nurse;
+
+  bool get _handoverAcknowledgedForMedication =>
+      _handoverSnapshot?.acknowledged ?? false;
 
   @override
   void initState() {
@@ -76,6 +94,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       setState(() {
         _isLoading = true;
         _errorMessage = null;
+        _emarErrorMessage = null;
       });
     }
 
@@ -84,9 +103,37 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         accessToken: widget.accessToken,
         residentId: widget.residentId,
       );
+      ResidentEmarProfile? emarProfile;
+      String? emarErrorMessage;
+      HandoverSnapshot? handoverSnapshot;
+
+      if (_canViewMedicationContent) {
+        try {
+          emarProfile = await widget.apiClient.getResidentEmar(
+            accessToken: widget.accessToken,
+            residentId: widget.residentId,
+          );
+        } on ApiException catch (error) {
+          emarErrorMessage = error.message;
+        }
+      }
+
+      if (_canRecordMedicationAdministration) {
+        try {
+          handoverSnapshot = await widget.apiClient.getCurrentHandover(
+            accessToken: widget.accessToken,
+          );
+        } on ApiException {
+          handoverSnapshot = null;
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _resident = resident;
+        _emarProfile = emarProfile;
+        _emarErrorMessage = emarErrorMessage;
+        _handoverSnapshot = handoverSnapshot;
         _errorMessage = null;
       });
       _scheduleHighlightedTaskReveal(resident);
@@ -108,8 +155,19 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
   }
 
   bool _isTaskCompletable(ResidentTaskSummary task) {
-    return task.status == TaskStatus.pending ||
-        task.status == TaskStatus.overdue;
+    return (task.status == TaskStatus.pending ||
+            task.status == TaskStatus.overdue) &&
+        task.canComplete;
+  }
+
+  List<ResidentTaskSummary> _visibleResidentTasks(ResidentDetail resident) {
+    if (_canViewMedicationContent) {
+      return resident.currentTasks;
+    }
+
+    return resident.currentTasks
+        .where((task) => task.focus != TaskFocus.medication)
+        .toList();
   }
 
   void _scheduleHighlightedTaskReveal(ResidentDetail resident) {
@@ -118,9 +176,9 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       return;
     }
 
-    final highlightedTaskExists = resident.currentTasks.any(
-      (task) => task.id == taskId,
-    );
+    final highlightedTaskExists = _visibleResidentTasks(
+      resident,
+    ).any((task) => task.id == taskId);
     if (!highlightedTaskExists) {
       if (mounted) {
         setState(() => _activeHighlightTaskId = null);
@@ -249,6 +307,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     final draft = await _showResidentSheet<ResidentTimelineEntryDraft>(
       (context) => _AddEntrySheet(
         initialType: initialType,
+        currentUserRole: widget.currentUserRole,
         onPickEvidence: _pickEvidence,
       ),
     );
@@ -323,6 +382,183 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     return 'image/jpeg';
   }
 
+  Future<List<MedicationRoundWitnessCandidate>> _loadPrnWitnessCandidates(
+    ResidentEmarProfile emarProfile,
+  ) async {
+    final handoverSnapshot = _handoverSnapshot;
+    if (handoverSnapshot == null) {
+      return const [];
+    }
+
+    try {
+      final round = await widget.apiClient.getMedicationRound(
+        accessToken: widget.accessToken,
+        shiftId: handoverSnapshot.shift.id,
+      );
+      return round.witnessCandidates;
+    } on ApiException catch (_) {
+      if (!mounted) {
+        return const [];
+      }
+
+      final witnessRequiredCount = emarProfile.prnMedications
+          .where((order) => order.requiresWitness)
+          .length;
+      final canOnlyUseWitnessFlow =
+          witnessRequiredCount == emarProfile.prnMedications.length;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            canOnlyUseWitnessFlow
+                ? 'Couldn\'t load the current shift witness list from the medication round. Try again in a moment or open the shift medication round first.'
+                : 'Couldn\'t load the current shift witness list from the medication round. PRN events that do not require a witness can still be recorded.',
+          ),
+        ),
+      );
+      return const [];
+    }
+  }
+
+  Future<void> _openRecordPrnEventSheet() async {
+    final emarProfile = _emarProfile;
+    if (emarProfile == null || emarProfile.prnMedications.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active PRN medication is available.')),
+      );
+      return;
+    }
+
+    if (!_handoverAcknowledgedForMedication) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Acknowledge the current handover before recording PRN medication.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final witnessCandidates = await _loadPrnWitnessCandidates(emarProfile);
+    if (!mounted) return;
+
+    final witnessRequiredCount = emarProfile.prnMedications
+        .where((order) => order.requiresWitness)
+        .length;
+    final canOnlyUseWitnessFlow =
+        witnessRequiredCount > 0 &&
+        witnessRequiredCount == emarProfile.prnMedications.length;
+    if (canOnlyUseWitnessFlow && witnessCandidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This resident\'s PRN medication requires a witness, but no witness candidates are available from the current shift medication round.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final draft = await _showResidentSheet<_PrnEventDraft>(
+      (context) => _RecordPrnEventSheet(
+        prnMedications: emarProfile.prnMedications,
+        recentEvents: emarProfile.recentEvents,
+        witnessCandidates: witnessCandidates,
+      ),
+    );
+
+    if (draft == null) {
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final result = await widget.apiClient.recordPrnEvent(
+        accessToken: widget.accessToken,
+        residentId: widget.residentId,
+        medicationOrderId: draft.medicationOrderId,
+        eventType: draft.eventType,
+        reason: draft.reason,
+        doseGiven: draft.doseGiven,
+        doseUnit: draft.doseUnit,
+        notes: draft.notes,
+        witnessUserId: draft.witnessUserId,
+      );
+      await _loadResident(showLoading: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${result.administrationEvent.eventType.label} recorded for ${result.administrationEvent.medicationName}.',
+          ),
+        ),
+      );
+      if (result.warning != null && result.warning!.trim().isNotEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('PRN Warning'),
+            content: Text(result.warning!),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _openMedicationRound() async {
+    final handoverSnapshot = _handoverSnapshot;
+    if (handoverSnapshot == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Medication round details are not available right now.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!handoverSnapshot.acknowledged) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Acknowledge the current handover before opening the medication round.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MedicationRoundScreen(
+          apiClient: widget.apiClient,
+          accessToken: widget.accessToken,
+          shiftId: handoverSnapshot.shift.id,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    await _loadResident(showLoading: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading && _resident == null) {
@@ -354,6 +590,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     }
 
     final resident = _resident!;
+    final visibleCurrentTasks = _visibleResidentTasks(resident);
 
     return Container(
       decoration: AppTheme.atmosphericBackground,
@@ -368,61 +605,18 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
             ),
           ],
         ),
-        floatingActionButton: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            FloatingActionButton.extended(
-              heroTag: 'report-incident',
-              onPressed: _isSaving ? null : _openReportIncidentSheet,
-              backgroundColor: AppTheme.errorRed,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.emergency_outlined),
-              label: Text(_isSaving ? 'Saving…' : 'Report incident'),
-            ),
-            const SizedBox(height: 12),
-            FloatingActionButton.extended(
-              heroTag: 'add-note',
-              onPressed: _isSaving ? null : _openAddEntrySheet,
-              backgroundColor: _noteSaveConfirmed
-                  ? AppTheme.successGreen
-                  : AppTheme.primaryBlue,
-              foregroundColor: Colors.white,
-              icon: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: _isSaving
-                    ? const SizedBox(
-                        key: ValueKey('saving-note'),
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Icon(
-                        _noteSaveConfirmed
-                            ? Icons.check_circle_rounded
-                            : Icons.edit_note_rounded,
-                        key: ValueKey(_noteSaveConfirmed),
-                      ),
-              ),
-              label: Text(
-                _isSaving
-                    ? 'Saving…'
-                    : _noteSaveConfirmed
-                    ? 'Saved'
-                    : 'Add note',
-              ),
-            ),
-          ],
+        bottomNavigationBar: _ResidentActionDock(
+          isSaving: _isSaving,
+          noteSaveConfirmed: _noteSaveConfirmed,
+          onAddNote: _isSaving ? null : _openAddEntrySheet,
+          onReportIncident: _isSaving ? null : _openReportIncidentSheet,
         ),
         body: SafeArea(
           child: RefreshIndicator(
             onRefresh: _loadResident,
             color: AppTheme.primaryBlue,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
               children: [
                 _ResidentHeader(resident: resident),
                 const SizedBox(height: 16),
@@ -434,6 +628,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
                 ],
                 _TodaySummaryCard(
                   resident: resident,
+                  tasks: visibleCurrentTasks,
                   highlightTaskId: _activeHighlightTaskId,
                   taskBeingUpdatedId: _taskBeingUpdatedId,
                   highlightTaskKey: _highlightTaskKey,
@@ -442,6 +637,25 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
                   taskNoteController: _completionControllerForTask,
                   onCompleteTask: _completeResidentTask,
                 ),
+                if (_canViewMedicationContent) ...[
+                  const SizedBox(height: 16),
+                  _ResidentMedicationSection(
+                    profile: _emarProfile,
+                    isLoading: _isLoading && _emarProfile == null,
+                    errorMessage: _emarErrorMessage,
+                    canRecordMedicationAdministration:
+                        _canRecordMedicationAdministration,
+                    handoverAcknowledged: _handoverAcknowledgedForMedication,
+                    onOpenMedicationRound:
+                        _canRecordMedicationAdministration && !_isSaving
+                        ? _openMedicationRound
+                        : null,
+                    onRecordPrnEvent:
+                        _canRecordMedicationAdministration && !_isSaving
+                        ? _openRecordPrnEventSheet
+                        : null,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Text(
                   'Care notes',

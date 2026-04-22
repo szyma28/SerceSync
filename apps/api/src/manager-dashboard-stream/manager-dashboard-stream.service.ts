@@ -11,7 +11,8 @@ export type ManagerDashboardUpdateReason =
   | 'incident-resolved'
   | 'task-completed'
   | 'task-deferred'
-  | 'task-escalated';
+  | 'task-escalated'
+  | 'medication-updated';
 
 interface ManagerDashboardStreamPayload {
   type: ManagerDashboardStreamEventType;

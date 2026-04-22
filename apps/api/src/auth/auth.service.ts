@@ -122,14 +122,21 @@ export class AuthService {
     };
   }
 
-  buildManagerBrowserSession(user: AuthenticatedUserPayload) {
+  buildManagerBrowserSession(
+    accessToken: string,
+    user: AuthenticatedUserPayload,
+  ) {
     return {
+      accessToken,
       user,
     };
   }
 
-  buildManagerBrowserSessionFromRequestUser(user: AuthenticatedUser) {
-    return this.buildManagerBrowserSession({
+  buildManagerBrowserSessionFromRequestUser(
+    accessToken: string,
+    user: AuthenticatedUser,
+  ) {
+    return this.buildManagerBrowserSession(accessToken, {
       id: user.userId,
       email: user.email,
       displayName: user.displayName,

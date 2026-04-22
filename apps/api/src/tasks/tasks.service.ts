@@ -1,9 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { AuditEventKind, TaskStatus } from '@prisma/client';
+import type {
+  AuditEventKind,
+  TaskClinicalPriority,
+  TaskFocus,
+  TaskStatus,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { type AuditEventDetails } from '../audit-event-details';
 import {
@@ -13,6 +19,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteTaskDto } from './dto/complete-task.dto';
 import { TaskReasonDto } from './dto/task-reason.dto';
+import {
+  buildTaskActionPermissions,
+  medicationRestrictionReason,
+} from './task-action-permissions';
 
 const taskStatusSortOrder: Record<TaskStatus, number> = {
   PENDING: 0,
@@ -73,25 +83,37 @@ export class TasksService {
     });
   }
 
-  private toTaskSummary(task: {
-    id: string;
-    title: string;
-    description: string | null;
-    status: TaskStatus;
-    dueAt: Date | null;
-    statusNote: string | null;
-    statusUpdatedAt: Date | null;
-    assignedUserId: string | null;
-    residentId: string | null;
-    resident: {
-      fullName: string;
-      roomLabel: string;
-    } | null;
-  }) {
+  private toTaskSummary(
+    task: {
+      id: string;
+      title: string;
+      description: string | null;
+      focus: TaskFocus;
+      clinicalPriority: TaskClinicalPriority;
+      status: TaskStatus;
+      dueAt: Date | null;
+      statusNote: string | null;
+      statusUpdatedAt: Date | null;
+      assignedUserId: string | null;
+      residentId: string | null;
+      resident: {
+        fullName: string;
+        roomLabel: string;
+      } | null;
+    },
+    user: AuthenticatedUser,
+  ) {
+    const actionPermissions = buildTaskActionPermissions(task, {
+      currentUserId: user.userId,
+      currentUserRole: user.role,
+    });
+
     return {
       id: task.id,
       title: task.title,
       description: task.description,
+      focus: task.focus,
+      clinicalPriority: task.clinicalPriority,
       status: task.status,
       dueAt: task.dueAt,
       statusNote: task.statusNote,
@@ -100,18 +122,18 @@ export class TasksService {
       residentId: task.residentId,
       residentName: task.resident?.fullName ?? null,
       room: task.resident?.roomLabel ?? null,
+      ...actionPermissions,
     };
   }
 
-  private async findActionableTask(taskId: string, userId: string) {
-    const shift = await this.findCurrentShiftForUser(userId);
+  private async findActionableTask(taskId: string, user: AuthenticatedUser) {
+    const shift = await this.findCurrentShiftForUser(user.userId);
     await this.syncOverdueTasks(shift.id);
 
     const task = await this.prisma.task.findFirst({
       where: {
         id: taskId,
         shiftId: shift.id,
-        assignedUserId: userId,
       },
       include: {
         resident: true,
@@ -119,6 +141,19 @@ export class TasksService {
     });
 
     if (!task) {
+      throw new NotFoundException(
+        'The requested task was not found in the current user shift.',
+      );
+    }
+
+    if (task.focus === 'MEDICATION' && user.role !== 'NURSE') {
+      throw new ForbiddenException({
+        message: medicationRestrictionReason,
+        code: 'MEDICATION_NURSE_REQUIRED',
+      });
+    }
+
+    if (task.assignedUserId !== user.userId) {
       throw new NotFoundException(
         'The requested task was not found in the current user shift.',
       );
@@ -140,7 +175,7 @@ export class TasksService {
     auditKind: AuditEventKind,
     note: string | null,
   ) {
-    const { shift, task } = await this.findActionableTask(taskId, user.userId);
+    const { shift, task } = await this.findActionableTask(taskId, user);
     const now = new Date();
 
     const updatedTask = await this.prisma.$transaction(async (tx) => {
@@ -193,21 +228,33 @@ export class TasksService {
     }
 
     return {
-      task: this.toTaskSummary(updatedTask),
+      task: this.toTaskSummary(updatedTask, user),
     };
   }
 
   async getCurrentTasks(user: AuthenticatedUser) {
     const shift = await this.findCurrentShiftForUser(user.userId);
     await this.syncOverdueTasks(shift.id);
+    const shouldIncludeMedicationTasks = user.role === 'NURSE';
 
     const tasks = await this.prisma.task.findMany({
       where: {
         shiftId: shift.id,
-        assignedUserId: user.userId,
         status: {
           notIn: ['COMPLETED', 'DEFERRED'],
         },
+        OR: [
+          {
+            assignedUserId: user.userId,
+          },
+          ...(shouldIncludeMedicationTasks
+            ? [
+                {
+                  focus: 'MEDICATION' as const,
+                },
+              ]
+            : []),
+        ],
       },
       include: {
         resident: true,
@@ -248,7 +295,7 @@ export class TasksService {
         displayName: user.displayName,
         role: user.role,
       },
-      tasks: sortedTasks.map((task) => this.toTaskSummary(task)),
+      tasks: sortedTasks.map((task) => this.toTaskSummary(task, user)),
     };
   }
 

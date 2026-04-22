@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -21,7 +22,13 @@ import {
   type AuditEventDetails,
 } from '../audit-event-details';
 import { ManagerDashboardStreamService } from '../manager-dashboard-stream/manager-dashboard-stream.service';
+import { MedicationOperationalSummaryService } from '../medications/medication-operational-summary.service';
+import type { MedicationTaskCompatibleSummary } from '../medications/medication-operational-summary.types';
+import { MedicationsService } from '../medications/medications.service';
+import { mapMedicationExceptionFeedItem } from '../medications/manager-medication-exception-feed';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildTaskActionPermissions } from '../tasks/task-action-permissions';
+import { buildMedicationTaskSummary } from '../tasks/task-medication-summary';
 import { buildResidentPriorityState } from './resident-priority';
 import { CreateManagerResidentDto } from './dto/create-manager-resident.dto';
 import { CreateResidentIncidentDto } from './dto/create-resident-incident.dto';
@@ -89,6 +96,28 @@ const taskActivityBadgeByKind: Record<
   },
 };
 
+const medicationNoteRestrictionReason = 'Only nurses can add medication notes.';
+const emptyMedicationSummary: MedicationTaskCompatibleSummary = {
+  total: 0,
+  overdue: 0,
+  dueWithinHour: 0,
+  highPriority: 0,
+  headline: null,
+  warnings: [],
+};
+
+function hasMedicationSignal(summary: MedicationTaskCompatibleSummary | null) {
+  return (
+    summary != null &&
+    (summary.total > 0 ||
+      summary.overdue > 0 ||
+      summary.dueWithinHour > 0 ||
+      summary.highPriority > 0 ||
+      summary.headline != null ||
+      summary.warnings.length > 0)
+  );
+}
+
 function getTaskActivityBadgeConfig(
   kind: AuditEventKind,
 ): TaskActivityBadgeConfig | null {
@@ -111,6 +140,8 @@ export class ResidentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly managerDashboardStream: ManagerDashboardStreamService,
+    private readonly medicationsService: MedicationsService,
+    private readonly medicationOperationalSummaryService: MedicationOperationalSummaryService,
   ) {}
 
   private clampNumber(value: number, minimum: number, maximum: number) {
@@ -137,8 +168,8 @@ export class ResidentsService {
     return mediaDirectory;
   }
 
-  private logCleanupWarning(message: string, error: unknown) {
-    const details = error instanceof Error ? error.message : String(error);
+  private logCleanupWarning(message: string, error: Error) {
+    const details = error.message;
     this.logger.warn(`${message} (${details})`);
   }
 
@@ -159,7 +190,7 @@ export class ResidentsService {
     } catch (error) {
       this.logCleanupWarning(
         `Failed to remove resident timeline media record ${mediaRecord.id} during rollback`,
-        error,
+        error instanceof Error ? error : new Error(String(error)),
       );
     }
 
@@ -168,7 +199,7 @@ export class ResidentsService {
     } catch (error) {
       this.logCleanupWarning(
         `Failed to remove resident timeline media file ${storagePath} during rollback`,
-        error,
+        error instanceof Error ? error : new Error(String(error)),
       );
     }
   }
@@ -188,7 +219,7 @@ export class ResidentsService {
     } catch (error) {
       this.logCleanupWarning(
         `Failed to remove incident media record ${mediaRecord.id} during rollback`,
-        error,
+        error instanceof Error ? error : new Error(String(error)),
       );
     }
 
@@ -197,7 +228,7 @@ export class ResidentsService {
     } catch (error) {
       this.logCleanupWarning(
         `Failed to remove incident media file ${storagePath} during rollback`,
-        error,
+        error instanceof Error ? error : new Error(String(error)),
       );
     }
   }
@@ -227,6 +258,8 @@ export class ResidentsService {
   }
 
   private normalizeCreateResidentInput(input: CreateManagerResidentDto) {
+    const aboutMe = this.requireTrimmedText(input.aboutMe, 'aboutMe');
+
     return {
       fullName: this.requireTrimmedText(input.fullName, 'fullName'),
       roomNumber: input.roomNumber,
@@ -237,7 +270,8 @@ export class ResidentsService {
         input.recognitionImageKey,
         'recognitionImageKey',
       ),
-      careSummary: this.requireTrimmedText(input.careSummary, 'careSummary'),
+      careSummary: aboutMe,
+      aboutMe,
       baselinePriority: input.baselinePriority,
       isActive: input.isActive ?? true,
     };
@@ -269,13 +303,20 @@ export class ResidentsService {
             ),
           }
         : {}),
-      ...('careSummary' in input && input.careSummary != null
-        ? {
-            careSummary: this.normalizeOptionalTrimmedText(
-              input.careSummary,
-              'careSummary',
-            ),
-          }
+      ...('aboutMe' in input && input.aboutMe != null
+        ? (() => {
+            const aboutMe = this.normalizeOptionalTrimmedText(
+              input.aboutMe,
+              'aboutMe',
+            );
+
+            return aboutMe == null
+              ? {}
+              : {
+                  aboutMe,
+                  careSummary: aboutMe,
+                };
+          })()
         : {}),
       ...('roomNumber' in input && input.roomNumber != null
         ? {
@@ -298,18 +339,35 @@ export class ResidentsService {
   private toManagerShiftSummary(shift: {
     id: string;
     name: string;
+    status: string;
     unitLabel: string;
     floorNumber: number;
     startsAt: Date;
     endsAt: Date;
+    assignedUsers?: Array<{
+      id: string;
+      email: string;
+      displayName: string;
+      role: {
+        key: string;
+      };
+    }>;
   }) {
     return {
       id: shift.id,
       name: shift.name,
+      status: shift.status,
       unitLabel: shift.unitLabel,
       floorNumber: shift.floorNumber,
       startsAt: shift.startsAt,
       endsAt: shift.endsAt,
+      assignedUsers:
+        shift.assignedUsers?.map((user) => ({
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          role: user.role.key,
+        })) ?? [],
     };
   }
 
@@ -322,6 +380,7 @@ export class ResidentsService {
       select: {
         id: true,
         name: true,
+        status: true,
         unitLabel: true,
         floorNumber: true,
         startsAt: true,
@@ -348,6 +407,13 @@ export class ResidentsService {
         assignedUsers: {
           select: {
             id: true,
+            email: true,
+            displayName: true,
+            role: {
+              select: {
+                key: true,
+              },
+            },
           },
         },
         handover: {
@@ -355,6 +421,7 @@ export class ResidentsService {
             acknowledgements: {
               select: {
                 acknowledgedById: true,
+                acknowledgedAt: true,
               },
             },
           },
@@ -365,6 +432,8 @@ export class ResidentsService {
               select: {
                 fullName: true,
                 roomLabel: true,
+                floorNumber: true,
+                unitLabel: true,
               },
             },
           },
@@ -380,6 +449,60 @@ export class ResidentsService {
     }
 
     return shift;
+  }
+
+  private async findActiveDashboardShifts() {
+    const shifts = await this.prisma.shift.findMany({
+      where: {
+        status: 'ACTIVE',
+      },
+      include: {
+        assignedUsers: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            role: {
+              select: {
+                key: true,
+              },
+            },
+          },
+        },
+        handover: {
+          include: {
+            acknowledgements: {
+              select: {
+                acknowledgedById: true,
+                acknowledgedAt: true,
+              },
+            },
+          },
+        },
+        tasks: {
+          include: {
+            resident: {
+              select: {
+                fullName: true,
+                roomLabel: true,
+                floorNumber: true,
+                unitLabel: true,
+              },
+            },
+          },
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+      orderBy: [{ startsAt: 'desc' }, { floorNumber: 'asc' }],
+    });
+
+    if (shifts.length === 0) {
+      throw new NotFoundException(
+        'Active shift was not found for the manager dashboard.',
+      );
+    }
+
+    return shifts;
   }
 
   async ensureManagerDashboardShiftAccess(shiftId: string) {
@@ -411,6 +534,16 @@ export class ResidentsService {
   ) {
     const hasPersonalCareSubtype =
       createResidentTimelineEntryDto.personalCareSubtype != null;
+    const hasMealType = createResidentTimelineEntryDto.mealType != null;
+    const hasMealIntakeAmount =
+      createResidentTimelineEntryDto.mealIntakeAmount != null;
+    const hasStructuredMealFields = hasMealType || hasMealIntakeAmount;
+    const hasStructuredMealLog =
+      createResidentTimelineEntryDto.type === 'NUTRITION_HYDRATION' &&
+      hasMealType &&
+      hasMealIntakeAmount;
+    const hasDetails =
+      (createResidentTimelineEntryDto.details?.trim().length ?? 0) > 0;
 
     if (
       createResidentTimelineEntryDto.type === 'PERSONAL_CARE' &&
@@ -429,23 +562,73 @@ export class ResidentsService {
         'personalCareSubtype is only allowed when type is PERSONAL_CARE.',
       );
     }
+
+    if (
+      createResidentTimelineEntryDto.type !== 'NUTRITION_HYDRATION' &&
+      hasStructuredMealFields
+    ) {
+      throw new BadRequestException(
+        'mealType and mealIntakeAmount are only allowed when type is NUTRITION_HYDRATION.',
+      );
+    }
+
+    if (hasMealType !== hasMealIntakeAmount) {
+      throw new BadRequestException(
+        'mealType and mealIntakeAmount must be provided together.',
+      );
+    }
+
+    if (!hasDetails && !hasStructuredMealLog) {
+      throw new BadRequestException(
+        'details is required unless a structured meal intake log is provided.',
+      );
+    }
   }
 
-  private async getManagerActivityFeed(activeShift: {
-    id: string;
-    unitLabel: string;
-  }) {
+  private resolveTimelineEntryDetails(
+    createResidentTimelineEntryDto: CreateResidentTimelineEntryDto,
+  ) {
+    const trimmedDetails = createResidentTimelineEntryDto.details?.trim();
+    if (trimmedDetails) {
+      return trimmedDetails;
+    }
+
+    if (
+      createResidentTimelineEntryDto.type === 'NUTRITION_HYDRATION' &&
+      createResidentTimelineEntryDto.mealType &&
+      createResidentTimelineEntryDto.mealIntakeAmount
+    ) {
+      return 'No additional concerns noted.';
+    }
+
+    throw new BadRequestException('details is required.');
+  }
+
+  private async getManagerActivityFeed(
+    activeShifts: Array<{
+      id: string;
+      floorNumber: number;
+      unitLabel: string;
+    }>,
+  ) {
+    const shiftIds = activeShifts.map((shift) => shift.id);
+    const shiftById = new Map(activeShifts.map((shift) => [shift.id, shift]));
+
     const [timelineEntries, taskEvents, createdIncidents, incidentEvents] =
       await Promise.all([
         this.prisma.residentTimelineEntry.findMany({
           where: {
-            shiftId: activeShift.id,
+            shiftId: {
+              in: shiftIds,
+            },
           },
           include: {
             resident: {
               select: {
                 fullName: true,
                 roomLabel: true,
+                floorNumber: true,
+                unitLabel: true,
               },
             },
             createdBy: {
@@ -457,11 +640,13 @@ export class ResidentsService {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 12,
+          take: 18,
         }),
         this.prisma.auditEvent.findMany({
           where: {
-            shiftId: activeShift.id,
+            shiftId: {
+              in: shiftIds,
+            },
             kind: {
               in: ['TASK_COMPLETED', 'TASK_DEFERRED', 'TASK_ESCALATED'],
             },
@@ -481,6 +666,8 @@ export class ResidentsService {
                   select: {
                     fullName: true,
                     roomLabel: true,
+                    floorNumber: true,
+                    unitLabel: true,
                   },
                 },
               },
@@ -489,17 +676,24 @@ export class ResidentsService {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 12,
+          take: 18,
         }),
         this.prisma.incident.findMany({
           where: {
-            shiftId: activeShift.id,
+            shiftId: {
+              in: shiftIds,
+            },
+            resident: {
+              isActive: true,
+            },
           },
           include: {
             resident: {
               select: {
                 fullName: true,
                 roomLabel: true,
+                floorNumber: true,
+                unitLabel: true,
               },
             },
             createdBy: {
@@ -511,11 +705,13 @@ export class ResidentsService {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 12,
+          take: 18,
         }),
         this.prisma.auditEvent.findMany({
           where: {
-            shiftId: activeShift.id,
+            shiftId: {
+              in: shiftIds,
+            },
             kind: {
               in: ['INCIDENT_ACKNOWLEDGED', 'INCIDENT_RESOLVED'],
             },
@@ -530,7 +726,7 @@ export class ResidentsService {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 12,
+          take: 18,
         }),
       ]);
 
@@ -550,6 +746,8 @@ export class ResidentsService {
               select: {
                 fullName: true,
                 roomLabel: true,
+                floorNumber: true,
+                unitLabel: true,
               },
             },
           },
@@ -561,7 +759,18 @@ export class ResidentsService {
     );
 
     return [
-      ...timelineEntries.map((entry) => mapTimelineActivityFeedItem(entry)),
+      ...timelineEntries
+        .map((entry) => {
+          if (!entry.shiftId) {
+            return null;
+          }
+
+          return mapTimelineActivityFeedItem({
+            ...entry,
+            shiftId: entry.shiftId,
+          });
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
       ...taskEvents
         .map((event) => {
           if (!event.task) {
@@ -573,9 +782,20 @@ export class ResidentsService {
             return null;
           }
 
+          const shiftId = event.shiftId;
+          if (!shiftId) {
+            return null;
+          }
+
+          const shiftScope = shiftById.get(shiftId);
+          if (!shiftScope) {
+            return null;
+          }
+
           return mapTaskActivityFeedItem(
             {
               id: event.task.id,
+              shiftId,
               title: event.task.title,
               statusNote: event.task.statusNote,
               resident: event.task.resident,
@@ -584,21 +804,28 @@ export class ResidentsService {
             },
             config.badge,
             config.tone,
-            activeShift.unitLabel,
+            shiftScope,
           );
         })
         .filter((item): item is NonNullable<typeof item> => item !== null),
-      ...createdIncidents.map((incident) =>
-        mapIncidentCreatedActivityFeedItem({
-          id: incident.id,
-          title: incident.title,
-          details: incident.details,
-          severity: incident.severity,
-          occurredAt: incident.createdAt,
-          actorName: incident.createdBy?.displayName ?? null,
-          resident: incident.resident,
-        }),
-      ),
+      ...createdIncidents
+        .map((incident) => {
+          if (!incident.shiftId) {
+            return null;
+          }
+
+          return mapIncidentCreatedActivityFeedItem({
+            id: incident.id,
+            shiftId: incident.shiftId,
+            title: incident.title,
+            details: incident.details,
+            severity: incident.severity,
+            occurredAt: incident.createdAt,
+            actorName: incident.createdBy?.displayName ?? null,
+            resident: incident.resident,
+          });
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
       ...incidentEvents
         .map((event) => {
           const incidentId = getAuditDetailString(event.details, 'incidentId');
@@ -611,10 +838,16 @@ export class ResidentsService {
             return null;
           }
 
+          if (!incident.shiftId) {
+            return null;
+          }
+
           return mapIncidentTransitionActivityFeedItem({
             eventId: event.id,
+            shiftId: incident.shiftId,
             incident: {
               id: incident.id,
+              shiftId: incident.shiftId,
               title: incident.title,
               details: incident.details,
               severity: incident.severity,
@@ -767,6 +1000,24 @@ export class ResidentsService {
     return { shift, resident };
   }
 
+  private canViewMedicationResidentContent(
+    user: Pick<AuthenticatedUser, 'role'>,
+  ) {
+    return user.role === 'NURSE';
+  }
+
+  private filterResidentTasksForRole<
+    T extends {
+      focus: string;
+    },
+  >(tasks: T[], user: Pick<AuthenticatedUser, 'role'>) {
+    if (this.canViewMedicationResidentContent(user)) {
+      return tasks;
+    }
+
+    return tasks.filter((task) => task.focus !== 'MEDICATION');
+  }
+
   private async persistResidentTimelineMedia(
     file: UploadedEvidenceFile,
     entryId: string,
@@ -862,9 +1113,20 @@ export class ResidentsService {
     return {
       floorNumber: shift.floorNumber,
       unitLabel: shift.unitLabel,
-      residents: residents.map((resident) =>
-        mapResidentListItem(resident, shift),
-      ),
+      residents: residents.map((resident) => {
+        const visibleTasks = this.filterResidentTasksForRole(
+          resident.tasks,
+          user,
+        );
+
+        return mapResidentListItem(
+          {
+            ...resident,
+            tasks: visibleTasks,
+          },
+          shift,
+        );
+      }),
     };
   }
 
@@ -878,6 +1140,31 @@ export class ResidentsService {
       baselinePriority: resident.baselinePriority,
       incidents: resident.incidents,
     });
+    const visibleTasks = this.filterResidentTasksForRole(resident.tasks, user);
+    const medicationOperationalSummary = this.canViewMedicationResidentContent(
+      user,
+    )
+      ? await this.medicationOperationalSummaryService.buildResidentOperationalSummary(
+          resident.id,
+        )
+      : null;
+    const medicationTaskSummary = this.canViewMedicationResidentContent(user)
+      ? buildMedicationTaskSummary(visibleTasks)
+      : emptyMedicationSummary;
+    const medicationSummary = this.canViewMedicationResidentContent(user)
+      ? hasMedicationSignal(
+            medicationOperationalSummary?.taskSummaryCompatible ?? null,
+          )
+        ? medicationOperationalSummary?.taskSummaryCompatible ??
+          emptyMedicationSummary
+        : medicationTaskSummary
+      : emptyMedicationSummary;
+    const medicationProfile = this.canViewMedicationResidentContent(user)
+      ? await this.medicationsService.buildResidentMedicationProfile(
+          resident.id,
+          user,
+        )
+      : null;
 
     return {
       id: resident.id,
@@ -886,23 +1173,36 @@ export class ResidentsService {
       floorNumber: resident.floorNumber,
       unitLabel: resident.unitLabel,
       recognitionImageKey: resident.recognitionImageKey,
+      aboutMe: resident.aboutMe,
       todaySummary: resident.careSummary,
       assignmentContext: `Assigned to ${shift.unitLabel} for this shift`,
-      contextLine: buildContextLine(resident.tasks, resident.careSummary),
-      alerts: buildAlerts(resident.tasks),
+      contextLine: buildContextLine(
+        visibleTasks,
+        resident.careSummary,
+        Date.now(),
+        medicationSummary,
+      ),
+      alerts: buildAlerts(visibleTasks, medicationSummary),
       ...priorityState,
+      medicationSummary,
+      medicationOperationalSummary,
+      medicationProfile,
       activeIncidents: resident.incidents.map((incident) =>
         mapIncident(incident),
       ),
-      currentTasks: resident.tasks
-        .map((task) =>
-          mapResidentTask(
+      currentTasks: visibleTasks
+        .map((task) => ({
+          ...mapResidentTask(
             task,
             resident.roomLabel,
             resident.id,
             resident.fullName,
           ),
-        )
+          ...buildTaskActionPermissions(task, {
+            currentUserId: user.userId,
+            currentUserRole: user.role,
+          }),
+        }))
         .filter(
           (task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED',
         ),
@@ -920,6 +1220,16 @@ export class ResidentsService {
   ) {
     this.validateTimelineEntryPayload(createResidentTimelineEntryDto);
 
+    if (
+      createResidentTimelineEntryDto.type === 'MEDICATION_NOTE' &&
+      user.role !== 'NURSE'
+    ) {
+      throw new ForbiddenException({
+        message: medicationNoteRestrictionReason,
+        code: 'MEDICATION_NOTE_NURSE_REQUIRED',
+      });
+    }
+
     const { shift, resident } = await this.findResidentInUserScope(
       residentId,
       user.userId,
@@ -935,14 +1245,18 @@ export class ResidentsService {
             type: createResidentTimelineEntryDto.type,
             personalCareSubtype:
               createResidentTimelineEntryDto.personalCareSubtype ?? null,
+            mealType: createResidentTimelineEntryDto.mealType ?? null,
+            mealIntakeAmount:
+              createResidentTimelineEntryDto.mealIntakeAmount ?? null,
             title: buildEntryTitle(
               createResidentTimelineEntryDto.type,
               createResidentTimelineEntryDto.title,
               createResidentTimelineEntryDto.personalCareSubtype,
+              createResidentTimelineEntryDto.mealType,
+              createResidentTimelineEntryDto.mealIntakeAmount,
             ),
-            details: this.requireTrimmedText(
-              createResidentTimelineEntryDto.details,
-              'details',
+            details: this.resolveTimelineEntryDetails(
+              createResidentTimelineEntryDto,
             ),
             createdById: user.userId,
             shiftId: shift.id,
@@ -963,6 +1277,8 @@ export class ResidentsService {
               entryType: entry.type,
               entryTitle: entry.title,
               personalCareSubtype: entry.personalCareSubtype,
+              mealType: entry.mealType,
+              mealIntakeAmount: entry.mealIntakeAmount,
               mediaAttached: Boolean(evidenceFile),
             } satisfies AuditEventDetails,
           },
@@ -1003,6 +1319,8 @@ export class ResidentsService {
         entry: mapTimelineEntry({
           ...createdEntry,
           personalCareSubtype: createdEntry.personalCareSubtype,
+          mealType: createdEntry.mealType,
+          mealIntakeAmount: createdEntry.mealIntakeAmount,
           media: mediaRecord ? [mediaRecord] : [],
         }),
       };
@@ -1301,7 +1619,12 @@ export class ResidentsService {
           },
         },
       },
-      orderBy: [{ floorNumber: 'asc' }, { roomNumber: 'asc' }],
+      orderBy: [
+        { floorNumber: 'asc' },
+        { unitLabel: 'asc' },
+        { roomNumber: 'asc' },
+        { fullName: 'asc' },
+      ],
     });
 
     return {
@@ -1317,10 +1640,23 @@ export class ResidentsService {
       select: {
         id: true,
         name: true,
+        status: true,
         unitLabel: true,
         floorNumber: true,
         startsAt: true,
         endsAt: true,
+        assignedUsers: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            role: {
+              select: {
+                key: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
         startsAt: 'desc',
@@ -1334,18 +1670,23 @@ export class ResidentsService {
     };
   }
 
-  async getManagerDashboard(shiftId: string) {
-    const activeShift = await this.findActiveDashboardShiftById(shiftId);
+  async getManagerDashboard(shiftId?: string) {
+    const activeShifts = shiftId
+      ? [await this.findActiveDashboardShiftById(shiftId)]
+      : await this.findActiveDashboardShifts();
+    const shiftIds = activeShifts.map((shift) => shift.id);
+    const shiftById = new Map(activeShifts.map((shift) => [shift.id, shift]));
 
-    const [incidents, activityFeed] = await Promise.all([
+    const [incidents, activityFeed, medicationOverview] = await Promise.all([
       this.prisma.incident.findMany({
         where: {
           status: {
             in: activeIncidentStatuses,
           },
+          shiftId: {
+            in: shiftIds,
+          },
           resident: {
-            floorNumber: activeShift.floorNumber,
-            unitLabel: activeShift.unitLabel,
             isActive: true,
           },
         },
@@ -1354,27 +1695,29 @@ export class ResidentsService {
             select: {
               fullName: true,
               roomLabel: true,
+              floorNumber: true,
+              unitLabel: true,
             },
           },
         },
         orderBy: [{ createdAt: 'desc' }],
       }),
-      this.getManagerActivityFeed(activeShift),
+      this.getManagerActivityFeed(
+        activeShifts.map((shift) => ({
+          id: shift.id,
+          floorNumber: shift.floorNumber,
+          unitLabel: shift.unitLabel,
+        })),
+      ),
+      this.medicationsService.buildManagerMedicationOverview(shiftId),
     ]);
 
-    const assignedUserIds = new Set(
-      activeShift.assignedUsers.map((user) => user.id),
+    const normalizedTasks = activeShifts.flatMap((activeShift) =>
+      activeShift.tasks.map((task) => ({
+        ...task,
+        dashboardStatus: getDashboardTaskStatus(task),
+      })),
     );
-    const acknowledgedUserIds = new Set(
-      activeShift.handover?.acknowledgements.map(
-        (item) => item.acknowledgedById,
-      ) ?? [],
-    );
-
-    const normalizedTasks = activeShift.tasks.map((task) => ({
-      ...task,
-      dashboardStatus: getDashboardTaskStatus(task),
-    }));
 
     const overdueTasks = normalizedTasks.filter(
       (task) => task.dashboardStatus === 'OVERDUE',
@@ -1382,27 +1725,70 @@ export class ResidentsService {
     const escalatedItems = normalizedTasks.filter(
       (task) => task.dashboardStatus === 'ESCALATED',
     ).length;
-    const unreadHandovers = Math.max(
-      assignedUserIds.size - acknowledgedUserIds.size,
-      0,
-    );
+    const unreadHandovers = activeShifts.reduce((total, activeShift) => {
+      const assignedUserIds = new Set(
+        activeShift.assignedUsers.map((user) => user.id),
+      );
+      const acknowledgedUserIds = new Set(
+        activeShift.handover?.acknowledgements.map(
+          (item) => item.acknowledgedById,
+        ) ?? [],
+      );
+
+      return (
+        total + Math.max(assignedUserIds.size - acknowledgedUserIds.size, 0)
+      );
+    }, 0);
 
     const shiftElapsedRatio =
-      (Date.now() - activeShift.startsAt.getTime()) /
-      Math.max(
-        activeShift.endsAt.getTime() - activeShift.startsAt.getTime(),
-        1,
-      );
+      activeShifts.reduce((total, activeShift) => {
+        return (
+          total +
+          (Date.now() - activeShift.startsAt.getTime()) /
+            Math.max(
+              activeShift.endsAt.getTime() - activeShift.startsAt.getTime(),
+              1,
+            )
+        );
+      }, 0) / activeShifts.length;
     const shiftCompletionPercent = this.clampNumber(
       Math.round(shiftElapsedRatio * 100),
       0,
       100,
     );
 
+    const medicationExceptionFeed = medicationOverview.exceptions.map((entry) =>
+      mapMedicationExceptionFeedItem({
+        id: entry.id,
+        shiftId: entry.shiftId,
+        residentName: entry.residentName,
+        roomLabel: entry.roomLabel,
+        floorNumber: entry.floorNumber,
+        unitLabel: entry.unitLabel,
+        medicationName: entry.medicationName,
+        dueWindowEnd: entry.dueWindowEnd,
+        status: entry.status,
+        recordedByUserName: entry.recordedByUserName,
+        recordedAt: entry.recordedAt,
+        reason: entry.reason,
+        notes: entry.notes,
+        roundLabel: entry.roundLabel,
+      }),
+    );
+
     const exceptionFeed = [
       ...incidents.map((incident) => mapIncidentExceptionFeedItem(incident)),
+      ...medicationExceptionFeed,
       ...normalizedTasks
-        .map((task) => mapTaskExceptionFeedItem(task, activeShift))
+        .filter((task) => task.focus !== 'MEDICATION')
+        .map((task) => {
+          const shiftScope = shiftById.get(task.shiftId);
+          if (!shiftScope) {
+            return null;
+          }
+
+          return mapTaskExceptionFeedItem(task, shiftScope);
+        })
         .filter((item): item is NonNullable<typeof item> => item !== null),
     ]
       .sort((left, right) => {
@@ -1421,16 +1807,29 @@ export class ResidentsService {
       .slice(0, 5)
       .map((item) => stripRank(item));
 
+    const shiftStartsAt = new Date(
+      Math.min(
+        ...activeShifts.map((activeShift) => activeShift.startsAt.getTime()),
+      ),
+    );
+    const shiftEndsAt = new Date(
+      Math.max(
+        ...activeShifts.map((activeShift) => activeShift.endsAt.getTime()),
+      ),
+    );
     const complianceSeries = buildManagerComplianceSeries({
-      shiftStartsAt: activeShift.startsAt,
-      shiftEndsAt: activeShift.endsAt,
+      shiftStartsAt,
+      shiftEndsAt,
       overdueTasks,
       escalatedItems,
       unreadHandovers,
     });
 
     return {
-      activeShift: this.toManagerShiftSummary(activeShift),
+      activeShift: this.toManagerShiftSummary(activeShifts[0]),
+      activeShifts: activeShifts.map((activeShift) =>
+        this.toManagerShiftSummary(activeShift),
+      ),
       metrics: {
         overdueTasks,
         escalatedItems,
@@ -1441,6 +1840,7 @@ export class ResidentsService {
       activityFeed,
       exceptionFeed,
       complianceSeries,
+      medicationOverview,
     };
   }
 
@@ -1461,6 +1861,7 @@ export class ResidentsService {
           unitLabel: normalizedInput.unitLabel,
           recognitionImageKey: normalizedInput.recognitionImageKey,
           careSummary: normalizedInput.careSummary,
+          aboutMe: normalizedInput.aboutMe,
           baselinePriority: normalizedInput.baselinePriority,
           isActive: normalizedInput.isActive,
         },

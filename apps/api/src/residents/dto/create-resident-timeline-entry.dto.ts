@@ -1,8 +1,12 @@
-import { PersonalCareSubtype, ResidentTimelineEntryType } from '@prisma/client';
+import {
+  MealIntakeAmount,
+  MealType,
+  PersonalCareSubtype,
+  ResidentTimelineEntryType,
+} from '@prisma/client';
 import {
   ValidateIf,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
@@ -18,9 +22,9 @@ export class CreateResidentTimelineEntryDto {
   title?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(2000)
-  details!: string;
+  details?: string;
 
   @ValidateIf(
     (value: CreateResidentTimelineEntryDto) =>
@@ -29,4 +33,16 @@ export class CreateResidentTimelineEntryDto {
   @IsEnum(PersonalCareSubtype)
   @IsOptional()
   personalCareSubtype?: PersonalCareSubtype;
+
+  @ValidateIf((value: CreateResidentTimelineEntryDto) => value.mealType != null)
+  @IsEnum(MealType)
+  @IsOptional()
+  mealType?: MealType;
+
+  @ValidateIf(
+    (value: CreateResidentTimelineEntryDto) => value.mealIntakeAmount != null,
+  )
+  @IsEnum(MealIntakeAmount)
+  @IsOptional()
+  mealIntakeAmount?: MealIntakeAmount;
 }
