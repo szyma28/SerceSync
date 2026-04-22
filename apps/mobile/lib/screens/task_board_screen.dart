@@ -77,7 +77,7 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
     final bool isAllTasks = filter == 'All Tasks';
     return ScreenMessageState(
       imageAssetPath: isAllTasks
-          ? 'assets/images/Resident.png'
+          ? 'assets/images/resident_profile_01.png'
           : 'assets/images/Nurse03.png',
       imageHeight: 200,
       title: isAllTasks ? 'No Tasks Assigned' : 'All Caught Up!',
@@ -110,9 +110,17 @@ class _TaskBoardScreenState extends State<TaskBoardScreen> {
     );
   }
 
+  List<ShiftTask> _visibleTasksForCurrentUser(List<ShiftTask> tasks) {
+    if (widget.user.role == AppUserRole.nurse) {
+      return tasks;
+    }
+
+    return tasks.where((task) => task.focus != TaskFocus.medication).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    List<ShiftTask> displayedTasks = _tasks;
+    List<ShiftTask> displayedTasks = _visibleTasksForCurrentUser(_tasks);
     if (_filter == 'To Do') {
       displayedTasks = _tasks
           .where(
@@ -336,6 +344,10 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
   String? _error;
   String? _actionType;
 
+  bool get _canComplete => widget.task.canComplete;
+  bool get _canDefer => widget.task.canDefer;
+  bool get _canEscalate => widget.task.canEscalate;
+
   @override
   void dispose() {
     _reasonController.dispose();
@@ -343,6 +355,22 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
   }
 
   Future<void> _performAction(String action) async {
+    final actionAllowed = switch (action) {
+      'complete' => _canComplete,
+      'defer' => _canDefer,
+      'escalate' => _canEscalate,
+      _ => false,
+    };
+
+    if (!actionAllowed) {
+      setState(() {
+        _error =
+            widget.task.actionRestrictionReason ??
+            'This task action is not available right now.';
+      });
+      return;
+    }
+
     if (action != 'complete' && _reasonController.text.trim().isEmpty) {
       setState(() => _error = 'Please provide a reason to $action this task.');
       return;
@@ -470,6 +498,40 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                   const SizedBox(height: 24),
                 ],
 
+                if (widget.task.actionRestrictionReason != null &&
+                    !showReasonInput) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceBackground,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.borderLight),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.lock_outline,
+                          color: AppTheme.textSecondary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            widget.task.actionRestrictionReason!,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: AppTheme.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
                 if (showReasonInput) ...[
                   Container(
                     decoration: BoxDecoration(
@@ -563,7 +625,9 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                       ),
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Mark as Complete'),
-                      onPressed: widget.task.status == TaskStatus.completed
+                      onPressed:
+                          widget.task.status == TaskStatus.completed ||
+                              !_canComplete
                           ? null
                           : () => _performAction('complete'),
                     ),
@@ -575,8 +639,9 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.schedule),
                           label: const Text('Defer'),
-                          onPressed: () =>
-                              setState(() => _actionType = 'defer'),
+                          onPressed: !_canDefer
+                              ? null
+                              : () => setState(() => _actionType = 'defer'),
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -592,8 +657,9 @@ class _TaskActionSheetState extends State<_TaskActionSheet> {
                           ),
                           icon: const Icon(Icons.trending_up),
                           label: const Text('Escalate'),
-                          onPressed: () =>
-                              setState(() => _actionType = 'escalate'),
+                          onPressed: !_canEscalate
+                              ? null
+                              : () => setState(() => _actionType = 'escalate'),
                         ),
                       ),
                     ],

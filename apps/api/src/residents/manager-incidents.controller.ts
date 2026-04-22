@@ -1,4 +1,11 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -16,7 +23,7 @@ export class ManagerIncidentsController {
 
   @Post(':id/acknowledge')
   acknowledgeIncident(
-    @Param('id') incidentId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) incidentId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() acknowledgeManagerIncidentDto: AcknowledgeManagerIncidentDto,
   ) {
@@ -29,7 +36,7 @@ export class ManagerIncidentsController {
 
   @Post(':id/resolve')
   resolveIncident(
-    @Param('id') incidentId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) incidentId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() resolveManagerIncidentDto: ResolveManagerIncidentDto,
   ) {

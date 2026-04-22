@@ -5,110 +5,198 @@ class _ResidentHeader extends StatelessWidget {
 
   final ResidentDetail resident;
 
+  String get _aboutMeText {
+    return resident.aboutMe.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(color: AppTheme.borderLight),
         boxShadow: AppTheme.premiumShadow,
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Image.asset(
-              resident.photoAssetPath,
-              width: 84,
-              height: 84,
-              fit: BoxFit.cover,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: Image.asset(
+                  resident.photoAssetPath,
+                  width: 88,
+                  height: 88,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      resident.fullName,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBlueLight.withAlpha(80),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        resident.roomLabel,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: AppTheme.primaryBlueDark,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceBackground,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.borderLight),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  resident.fullName,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  resident.roomLabel,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: AppTheme.primaryBlueDark,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                Row(
                   children: [
-                    ResidentPriorityBadge(
-                      priority: resident.effectivePriority,
-                      source: resident.prioritySource,
-                      overrideLabel: 'override',
+                    const Icon(
+                      Icons.auto_stories_outlined,
+                      color: AppTheme.primaryBlueDark,
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceBackground,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: AppTheme.borderLight),
-                      ),
-                      child: Text(
-                        'Baseline ${resident.baselinePriority.label}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'About me',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppTheme.primaryBlueDark,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  resident.assignmentContext,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: resident.alerts
-                      .map(
-                        (alert) => Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryBlueLight,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            alert,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: AppTheme.primaryBlueDark,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ),
-                      )
-                      .toList(),
+                  _aboutMeText,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: AppTheme.textPrimary,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ResidentActionDock extends StatelessWidget {
+  const _ResidentActionDock({
+    required this.isSaving,
+    required this.noteSaveConfirmed,
+    required this.onAddNote,
+    required this.onReportIncident,
+  });
+
+  final bool isSaving;
+  final bool noteSaveConfirmed;
+  final VoidCallback? onAddNote;
+  final VoidCallback? onReportIncident;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(244),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AppTheme.borderLight),
+            boxShadow: AppTheme.premiumShadow,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onReportIncident,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.errorRed,
+                    side: BorderSide(
+                      color: AppTheme.errorRed.withAlpha(70),
+                      width: 1.5,
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: const Icon(Icons.emergency_outlined),
+                  label: Text(isSaving ? 'Saving…' : 'Report incident'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onAddNote,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: noteSaveConfirmed
+                        ? AppTheme.successGreen
+                        : AppTheme.primaryBlue,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: isSaving
+                        ? const SizedBox(
+                            key: ValueKey('saving-note'),
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Icon(
+                            noteSaveConfirmed
+                                ? Icons.check_circle_rounded
+                                : Icons.edit_note_rounded,
+                            key: ValueKey(noteSaveConfirmed),
+                          ),
+                  ),
+                  label: Text(
+                    isSaving
+                        ? 'Saving…'
+                        : noteSaveConfirmed
+                        ? 'Saved'
+                        : 'Add note',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

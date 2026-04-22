@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { ShiftStatus } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/authenticated-user.interface';
+import { MedicationOperationalSummaryService } from '../medications/medication-operational-summary.service';
+import type { MedicationTaskCompatibleSummary } from '../medications/medication-operational-summary.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildMedicationTaskSummary } from '../tasks/task-medication-summary';
 
 type ShiftSummaryInput = {
   id: string;
@@ -17,9 +21,33 @@ type ShiftSummaryInput = {
   } | null;
 };
 
+const emptyMedicationSummary: MedicationTaskCompatibleSummary = {
+  total: 0,
+  overdue: 0,
+  dueWithinHour: 0,
+  highPriority: 0,
+  headline: null,
+  warnings: [],
+};
+
+function hasMedicationSignal(summary: MedicationTaskCompatibleSummary | null) {
+  return (
+    summary != null &&
+    (summary.total > 0 ||
+      summary.overdue > 0 ||
+      summary.dueWithinHour > 0 ||
+      summary.highPriority > 0 ||
+      summary.headline != null ||
+      summary.warnings.length > 0)
+  );
+}
+
 @Injectable()
 export class ShiftsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly medicationOperationalSummaryService: MedicationOperationalSummaryService,
+  ) {}
 
   private toShiftSummary(shift: ShiftSummaryInput) {
     const acknowledgement = shift.handover?.acknowledgements[0] ?? null;
@@ -75,12 +103,13 @@ export class ShiftsService {
     return this.toShiftSummary(shift);
   }
 
-  async getShiftOverviewForUser(userId: string) {
-    const assignments = await this.prisma.shift.findMany({
+  async getShiftOverviewForUser(user: AuthenticatedUser) {
+    const currentShift = await this.prisma.shift.findFirst({
       where: {
+        status: 'ACTIVE',
         assignedUsers: {
           some: {
-            id: userId,
+            id: user.userId,
           },
         },
       },
@@ -89,7 +118,7 @@ export class ShiftsService {
           include: {
             acknowledgements: {
               where: {
-                acknowledgedById: userId,
+                acknowledgedById: user.userId,
               },
               select: {
                 acknowledgedAt: true,
@@ -98,17 +127,42 @@ export class ShiftsService {
           },
         },
       },
-      orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy: {
+        startsAt: 'desc',
+      },
     });
-
-    const currentShift =
-      assignments.find((assignment) => assignment.status === 'ACTIVE') ?? null;
+    const medicationOperationalSummary =
+      currentShift && user.role === 'NURSE'
+        ? await this.medicationOperationalSummaryService.buildShiftOperationalSummary(
+            currentShift.id,
+          )
+        : null;
+    const medicationTaskSummary =
+      currentShift && user.role === 'NURSE'
+        ? buildMedicationTaskSummary(
+            await this.prisma.task.findMany({
+              where: {
+                shiftId: currentShift.id,
+              },
+              select: {
+                focus: true,
+                status: true,
+                dueAt: true,
+                clinicalPriority: true,
+              },
+            }),
+          )
+        : emptyMedicationSummary;
+    const medicationSummary = hasMedicationSignal(
+      medicationOperationalSummary?.taskSummaryCompatible ?? null,
+    )
+      ? medicationOperationalSummary?.taskSummaryCompatible ?? emptyMedicationSummary
+      : medicationTaskSummary;
 
     return {
       currentShift: currentShift ? this.toShiftSummary(currentShift) : null,
-      assignments: assignments.map((assignment) =>
-        this.toShiftSummary(assignment),
-      ),
+      medicationSummary,
+      medicationOperationalSummary,
     };
   }
 }

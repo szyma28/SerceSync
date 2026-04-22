@@ -4,10 +4,12 @@ import {
   Get,
   HttpCode,
   Post,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import type { CookieOptions, Response } from 'express';
+import type { Request } from 'express';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { CurrentUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -30,12 +32,40 @@ type LoginResponse = {
 };
 
 type ManagerBrowserSession = {
+  accessToken: string;
   user: SessionUser;
 };
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  private readManagerSessionToken(request: Request) {
+    const authorizationHeader = request.headers.authorization;
+    if (authorizationHeader) {
+      const [scheme, token] = authorizationHeader.split(' ');
+      if (scheme === 'Bearer' && token && token.trim().length > 0) {
+        return token.trim();
+      }
+    }
+
+    const cookieHeader = request.headers.cookie;
+    if (!cookieHeader) {
+      return '';
+    }
+
+    for (const rawCookie of cookieHeader.split(';')) {
+      const cookie = rawCookie.trim();
+      if (!cookie.startsWith(`${MANAGER_SESSION_COOKIE_NAME}=`)) {
+        continue;
+      }
+
+      const token = cookie.substring(MANAGER_SESSION_COOKIE_NAME.length + 1);
+      return token.trim();
+    }
+
+    return '';
+  }
 
   private managerSessionCookieOptions(): CookieOptions {
     const isSecure = process.env.NODE_ENV === 'production';
@@ -65,16 +95,23 @@ export class AuthController {
       this.managerSessionCookieOptions(),
     );
 
-    return this.authService.buildManagerBrowserSession(session.user);
+    return this.authService.buildManagerBrowserSession(
+      session.accessToken,
+      session.user,
+    );
   }
 
   @Get('manager/session')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('MANAGER')
   getManagerBrowserSession(
+    @Req() request: Request,
     @CurrentUser() user: AuthenticatedUser,
   ): ManagerBrowserSession {
-    return this.authService.buildManagerBrowserSessionFromRequestUser(user);
+    return this.authService.buildManagerBrowserSessionFromRequestUser(
+      this.readManagerSessionToken(request),
+      user,
+    );
   }
 
   @Post('manager/logout')

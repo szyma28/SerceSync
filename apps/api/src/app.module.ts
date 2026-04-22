@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { HandoversModule } from './handovers/handovers.module';
+import { MedicationsModule } from './medications/medications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ResidentsModule } from './residents/residents.module';
 import { ShiftsModule } from './shifts/shifts.module';
@@ -20,6 +21,7 @@ import { TasksModule } from './tasks/tasks.module';
     HandoversModule,
     TasksModule,
     ResidentsModule,
+    MedicationsModule,
     PrismaModule,
   ],
   controllers: [AppController],

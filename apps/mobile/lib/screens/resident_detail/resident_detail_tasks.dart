@@ -3,6 +3,7 @@ part of '../resident_detail_screen.dart';
 class _TodaySummaryCard extends StatelessWidget {
   const _TodaySummaryCard({
     required this.resident,
+    required this.tasks,
     required this.taskNoteController,
     required this.onCompleteTask,
     required this.highlightTaskKey,
@@ -13,6 +14,7 @@ class _TodaySummaryCard extends StatelessWidget {
   });
 
   final ResidentDetail resident;
+  final List<ResidentTaskSummary> tasks;
   final String? highlightTaskId;
   final String? taskBeingUpdatedId;
   final GlobalKey highlightTaskKey;
@@ -40,31 +42,22 @@ class _TodaySummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Shift summary', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
           Text(
-            resident.todaySummary,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Active priorities',
+            'Current care actions',
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
-          if (resident.currentTasks.isEmpty)
+          if (tasks.isEmpty)
             Text(
-              'No active priorities right now.',
+              'No care follow-ups are active right now.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
             )
           else
-            ...resident.currentTasks.map((task) {
+            ...tasks.map((task) {
               final isCollapsing = collapsingTaskIds.contains(task.id);
               return AnimatedSwitcher(
                 duration: const Duration(milliseconds: 280),
@@ -117,9 +110,72 @@ class _ResidentTaskCard extends StatelessWidget {
   final TextEditingController noteController;
   final VoidCallback onComplete;
 
-  bool get _isCompletable {
-    return task.status == TaskStatus.pending ||
-        task.status == TaskStatus.overdue;
+  bool get _isActionableStatus =>
+      task.status == TaskStatus.pending || task.status == TaskStatus.overdue;
+
+  bool get _canComplete => _isActionableStatus && task.canComplete;
+
+  bool get _showFocusChip => task.focus != TaskFocus.general;
+
+  bool get _showPriorityChip =>
+      task.clinicalPriority != TaskClinicalPriority.routine;
+
+  IconData get _focusIcon {
+    switch (task.focus) {
+      case TaskFocus.medication:
+        return Icons.medication_outlined;
+      case TaskFocus.hydration:
+        return Icons.local_drink_outlined;
+      case TaskFocus.observation:
+        return Icons.visibility_outlined;
+      case TaskFocus.personalCare:
+        return Icons.shower_outlined;
+      case TaskFocus.mobility:
+        return Icons.accessibility_new_outlined;
+      case TaskFocus.general:
+        return Icons.assignment_outlined;
+    }
+  }
+
+  Color get _focusColor {
+    switch (task.focus) {
+      case TaskFocus.medication:
+        return AppTheme.errorRed;
+      case TaskFocus.hydration:
+      case TaskFocus.observation:
+      case TaskFocus.personalCare:
+      case TaskFocus.mobility:
+      case TaskFocus.general:
+        return AppTheme.primaryBlueDark;
+    }
+  }
+
+  Color get _priorityColor {
+    switch (task.clinicalPriority) {
+      case TaskClinicalPriority.timeCritical:
+        return AppTheme.errorRed;
+      case TaskClinicalPriority.priority:
+        return const Color(0xFF9A6700);
+      case TaskClinicalPriority.routine:
+        return AppTheme.primaryBlueDark;
+    }
+  }
+
+  String? get _timingLabel {
+    final dueAt = task.dueAt;
+    if (task.focus == TaskFocus.medication) {
+      if (dueAt == null) {
+        return 'Medication round today';
+      }
+
+      return 'Medication at ${formatHourMinute(dueAt)}';
+    }
+
+    if (dueAt == null) {
+      return null;
+    }
+
+    return 'Check around ${formatHourMinute(dueAt)}';
   }
 
   @override
@@ -192,18 +248,72 @@ class _ResidentTaskCard extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
             ),
           ],
-          const SizedBox(height: 6),
-          Text(
-            task.dueAt == null
-                ? 'Due this shift'
-                : 'Due ${formatHourMinute(task.dueAt!)}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: AppTheme.primaryBlueDark,
-            ),
-          ),
-          if (_isCompletable) ...[
+          if (_showFocusChip || _showPriorityChip) ...[
             const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (_showFocusChip)
+                  _ResidentTaskMetaPill(
+                    icon: _focusIcon,
+                    label: task.focus.label,
+                    foreground: _focusColor,
+                    background: _focusColor.withAlpha(14),
+                  ),
+                if (_showPriorityChip)
+                  _ResidentTaskMetaPill(
+                    icon: Icons.priority_high_rounded,
+                    label: task.clinicalPriority.label,
+                    foreground: _priorityColor,
+                    background: _priorityColor.withAlpha(14),
+                  ),
+              ],
+            ),
+          ],
+          if (_timingLabel != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _timingLabel!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.primaryBlueDark,
+              ),
+            ),
+          ],
+          if (_isActionableStatus) ...[
+            const SizedBox(height: 10),
+            if (!_canComplete && task.actionRestrictionReason != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceBackground,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.borderLight),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.lock_outline,
+                      size: 18,
+                      color: AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        task.actionRestrictionReason!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               switchInCurve: Curves.easeOutCubic,
@@ -229,7 +339,7 @@ class _ResidentTaskCard extends StatelessWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Marked complete and added to the record.',
+                              'Saved to the care record.',
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
                                     color: AppTheme.successGreen,
@@ -244,19 +354,23 @@ class _ResidentTaskCard extends StatelessWidget {
                       key: ValueKey('entry-${task.id}'),
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextField(
-                          controller: noteController,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                            labelText: 'Completion note',
-                            alignLabelWithHint: true,
+                        if (_canComplete) ...[
+                          TextField(
+                            controller: noteController,
+                            maxLines: 2,
+                            decoration: const InputDecoration(
+                              labelText: 'Completion note',
+                              alignLabelWithHint: true,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
+                          const SizedBox(height: 10),
+                        ],
                         Align(
                           alignment: Alignment.centerRight,
                           child: FilledButton.icon(
-                            onPressed: isSaving ? null : onComplete,
+                            onPressed: isSaving || !_canComplete
+                                ? null
+                                : onComplete,
                             icon: isSaving
                                 ? const SizedBox(
                                     width: 16,
@@ -292,5 +406,44 @@ class _ResidentTaskCard extends StatelessWidget {
       case TaskStatus.pending:
         return 'Due';
     }
+  }
+}
+
+class _ResidentTaskMetaPill extends StatelessWidget {
+  const _ResidentTaskMetaPill({
+    required this.icon,
+    required this.label,
+    required this.foreground,
+    required this.background,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color foreground;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

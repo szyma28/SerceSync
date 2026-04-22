@@ -1,11 +1,11 @@
 import 'shared_models.dart';
 
-class LoginUser {
+class LoginUser extends UserProfile<AppUserRole> {
   const LoginUser({
-    required this.id,
-    required this.email,
-    required this.displayName,
-    required this.role,
+    required super.id,
+    required super.email,
+    required super.displayName,
+    required super.role,
   });
 
   factory LoginUser.fromJson(Map<String, dynamic> json) {
@@ -16,11 +16,6 @@ class LoginUser {
       role: AppUserRoleX.fromApiValue(json['role'] as String),
     );
   }
-
-  final String id;
-  final String email;
-  final String displayName;
-  final AppUserRole role;
 }
 
 class LoginResponse {

@@ -1,0 +1,9 @@
+name: sercesync_domain
+description: Shared SerceSync domain types for Flutter apps.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.0
+
+dependencies: {}

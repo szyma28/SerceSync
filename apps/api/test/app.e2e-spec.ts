@@ -6,6 +6,8 @@ import request from 'supertest';
 import { getAuditDetailString } from './../src/audit-event-details';
 import { AppModule } from './../src/app.module';
 import { MANAGER_SESSION_COOKIE_NAME } from './../src/auth/auth.constants';
+import { MedicationsService } from './../src/medications/medications.service';
+import { ManagerDashboardStreamService } from './../src/manager-dashboard-stream/manager-dashboard-stream.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 
 describe('SerceSync workflow slices (e2e)', () => {
@@ -14,26 +16,55 @@ describe('SerceSync workflow slices (e2e)', () => {
   let seededTasks: Task[];
   let seededResidents: Resident[];
   let activeShift: Shift;
-  let secondaryActiveShift: Shift;
+  let mapleActiveShift: Shift;
+  let cedarActiveShift: Shift;
   let seededIncidents: {
     amber: Incident;
     red: Incident;
   };
-  let secondaryUnitIncident: Incident;
+  let mapleFloorIncident: Incident;
+  let cedarFloorIncident: Incident;
   let outOfScopeResident: Resident;
-  let sameFloorDifferentUnitResident: Resident;
+  let cedarFloorResident: Resident;
+  let nurseUserId: string;
 
   const residentNames = [
     'Margaret Evans',
-    'Raj Patel',
-    'Edith Turner',
-    'Thomas Green',
-    'Amina Hussain',
+    'Emma Parker',
+    'Elliot Turner',
+    'Thea Green',
+    'Amir Hussain',
     'Sheila Morgan',
     'Brian Foster',
     'Joan Clarke',
     'Peter Wallace',
     'Lily Bennett',
+  ];
+
+  const mapleResidentNames = [
+    'Daniel Miller',
+    'Alice Morton',
+    'Isaac Collins',
+    'Sophie Brooks',
+    'Thomas Walker',
+    'Simone Price',
+    'Chloe Hughes',
+    'James Carter',
+    'Hannah Dixon',
+    'Mark Osei',
+  ];
+
+  const cedarResidentNames = [
+    'Agnes Cook',
+    'Zara Khan',
+    'Mabel Reed',
+    'Amelia Lewis',
+    'Simon Fletcher',
+    'Jean Porter',
+    'Frank Russell',
+    'Olive Chapman',
+    'Tara Banks',
+    'Ryan Coleman',
   ];
 
   const careSummaries = [
@@ -60,7 +91,7 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   type ManagerBrowserLoginResponse = {
-    accessToken?: undefined;
+    accessToken: string;
     user: {
       email: string;
       role: 'MANAGER';
@@ -68,6 +99,7 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   type ManagerSessionResponse = {
+    accessToken: string;
     user: {
       email: string;
       role: 'MANAGER';
@@ -90,6 +122,12 @@ describe('SerceSync workflow slices (e2e)', () => {
     tasks: Array<{
       id: string;
       status: string;
+      focus: string;
+      clinicalPriority: string;
+      canComplete: boolean;
+      canDefer: boolean;
+      canEscalate: boolean;
+      actionRestrictionReason: string | null;
     }>;
   };
 
@@ -104,17 +142,33 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   type ResidentDetailResponse = {
+    aboutMe?: string;
     effectivePriority: string;
     prioritySource: string;
+    medicationSummary: {
+      total: number;
+      overdue: number;
+      dueWithinHour: number;
+      highPriority: number;
+      headline: string | null;
+      warnings: string[];
+    };
     activeIncidents: Array<{
       id: string;
       severity: string;
       status: string;
       category: string;
     }>;
+    currentTasks: Array<{
+      id: string;
+      focus: string;
+      title: string;
+    }>;
     timeline: Array<{
       type: string;
       personalCareSubtype?: string;
+      mealType?: string;
+      mealIntakeAmount?: string;
     }>;
   };
 
@@ -123,6 +177,8 @@ describe('SerceSync workflow slices (e2e)', () => {
       id: string;
       type: string;
       personalCareSubtype?: string;
+      mealType?: string;
+      mealIntakeAmount?: string;
       media?: Array<{
         id: string;
         mediaType: string;
@@ -163,6 +219,9 @@ describe('SerceSync workflow slices (e2e)', () => {
   type ManagerShiftsResponse = {
     activeShifts: Array<{
       id: string;
+      name: string;
+      floorNumber: number;
+      unitLabel: string;
     }>;
   };
 
@@ -172,10 +231,18 @@ describe('SerceSync workflow slices (e2e)', () => {
     };
     metrics: {
       activeIncidents: number;
+      overdueTasks?: number;
+      escalatedItems?: number;
+      unreadHandovers?: number;
+      shiftCompletionPercent?: number;
     };
     exceptionFeed: Array<{
       kind: string;
       id: string;
+      shiftId: string;
+      floorNumber: number;
+      unitLabel: string;
+      roomLabel: string;
       status?: string;
       severity?: string;
       canAcknowledge?: boolean;
@@ -186,11 +253,17 @@ describe('SerceSync workflow slices (e2e)', () => {
       title: string;
       residentName: string;
       roomLabel: string;
+      floorNumber: number;
+      unitLabel: string;
+      shiftId: string;
       description: string;
       actorName: string | null;
       badge: string;
       badgeTone?: string;
     }>;
+    medicationOverview?: Awaited<
+      ReturnType<MedicationsService['buildManagerMedicationOverview']>
+    >;
   };
 
   type ManagerIncidentTransitionResponse = {
@@ -210,6 +283,7 @@ describe('SerceSync workflow slices (e2e)', () => {
       roomLabel?: string;
       floorNumber?: number;
       unitLabel?: string;
+      aboutMe?: string;
       baselinePriority?: string;
       effectivePriority?: string;
       prioritySource?: string;
@@ -218,14 +292,196 @@ describe('SerceSync workflow slices (e2e)', () => {
     };
   };
 
+  type ManagerResidentsResponse = {
+    residents: Array<{
+      id: string;
+      fullName: string;
+      roomNumber: number;
+      roomLabel: string;
+      floorNumber: number;
+      unitLabel: string;
+    }>;
+  };
+
   type ShiftOverviewResponse = {
     currentShift: {
       name: string;
       floorNumber: number;
       unitLabel: string;
     };
-    assignments: Array<{
-      name: string;
+    medicationSummary: {
+      total: number;
+      overdue: number;
+      dueWithinHour: number;
+      highPriority: number;
+      headline: string | null;
+      warnings: string[];
+    };
+  };
+
+  type ResidentEmarResponse = {
+    workflowNote: string;
+    resident: {
+      id: string;
+      fullName: string;
+      roomLabel: string;
+    };
+    chart: {
+      id: string;
+      status: string;
+    };
+    allergies: Array<{
+      id: string;
+      substance: string;
+      reaction: string | null;
+      severity: string | null;
+    }>;
+    scheduledMedications: Array<{
+      id: string;
+      medicationName: string;
+      isPRN: boolean;
+      schedules: Array<{
+        id: string;
+        roundLabel: string;
+        anchorType: string;
+      }>;
+    }>;
+    prnMedications: Array<{
+      id: string;
+      medicationName: string;
+      isPRN: boolean;
+      schedules: Array<{
+        id: string;
+      }>;
+      prnProtocol: {
+        id: string;
+        minimumIntervalMinutes: number | null;
+      } | null;
+    }>;
+    recentEvents: Array<{
+      id: string;
+      eventType: string;
+      medicationOrderId: string;
+      medicationName: string;
+      reason: string | null;
+    }>;
+    changeHistory: Array<{
+      id: string;
+      changeType: string;
+    }>;
+  };
+
+  type MedicationOrderWriteResponse = {
+    workflowNote: string;
+    medicationOrder: {
+      id: string;
+      medicationName: string;
+      isPRN: boolean;
+      schedules: Array<{
+        id: string;
+      }>;
+      prnProtocol: {
+        id: string;
+      } | null;
+    };
+  };
+
+  type MedicationScheduleWriteResponse = {
+    workflowNote: string;
+    schedule: {
+      id: string;
+      roundLabel: string;
+      anchorType: string;
+      windowStartOffsetMinutes: number | null;
+      windowEndOffsetMinutes: number | null;
+      fixedTimeLocal: string | null;
+      active: boolean;
+    };
+  };
+
+  type MedicationRoundGenerateResponse = {
+    generatedCount: number;
+    generatedDoseInstanceIds: string[];
+    shift: {
+      id: string;
+      handoverAcknowledged: boolean;
+      handoverAcknowledgedAt: string | null;
+    };
+  };
+
+  type MedicationRoundResponse = {
+    workflowNote: string;
+    safetyBanner: string;
+    shift: {
+      id: string;
+      handoverAcknowledged: boolean;
+      handoverAcknowledgedAt: string | null;
+    };
+    witnessCandidates: Array<{
+      id: string;
+      displayName: string;
+      role: string;
+    }>;
+    groupedRounds: Array<{
+      roundLabel: string;
+      items: Array<{
+        id: string;
+        residentId: string;
+        residentName: string;
+        roomLabel: string;
+        medicationOrderId: string;
+        medicationName: string;
+        status: string;
+        dueWindowStart: string;
+        dueWindowEnd: string;
+        reason: string | null;
+      }>;
+    }>;
+  };
+
+  type MedicationOutcomeResponse = {
+    workflowNote: string;
+    doseInstance: {
+      id: string;
+      status: string;
+      reason: string | null;
+    };
+    administrationEvent: {
+      id: string;
+      eventType: string;
+      reason: string | null;
+    };
+  };
+
+  type ManagerMedicationExceptionsResponse = {
+    workflowNote: string;
+    exceptions: Array<{
+      doseInstanceId: string;
+      residentId: string;
+      residentName: string;
+      medicationName: string;
+      status: string;
+      reason: string | null;
+      residentEmarPath: string;
+    }>;
+    recentPrnEvents: Array<{
+      id: string;
+      eventType: string;
+      medicationName: string;
+    }>;
+    recentChanges: Array<{
+      id: string;
+      changeType: string;
+      medicationName: string;
+    }>;
+  };
+
+  type ManagerOverdueMedicationResponse = {
+    workflowNote: string;
+    overdueMedication: Array<{
+      doseInstanceId: string;
+      residentName: string;
+      medicationName: string;
       status: string;
     }>;
   };
@@ -260,8 +516,120 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
   }
 
+  async function acknowledgeCurrentHandover(accessToken: string) {
+    return typedResponse<HandoverCurrentResponse>(
+      await request(app.getHttpServer())
+        .post('/handovers/current/acknowledge')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(201),
+    );
+  }
+
+  function startOfToday() {
+    const value = new Date();
+    value.setHours(0, 0, 0, 0);
+    return value;
+  }
+
+  async function ensureMedicationChart(residentId: string) {
+    const existing = await prisma.residentMedicationChart.findFirst({
+      where: {
+        residentId,
+        status: 'ACTIVE',
+      },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    return prisma.residentMedicationChart.create({
+      data: {
+        residentId,
+        status: 'ACTIVE',
+        createdByUserId: nurseUserId,
+      },
+    });
+  }
+
+  async function seedMedicationOrder(args: {
+    residentId: string;
+    medicationName: string;
+    formulation?: string;
+    strength?: string;
+    doseAmount?: string;
+    doseUnit?: string;
+    route?: string;
+    instructions?: string;
+    isPRN?: boolean;
+    isControlledDrug?: boolean;
+    requiresWitness?: boolean;
+    startDate?: Date;
+    endDate?: Date | null;
+    sourceType?: 'MANUAL_ENTRY' | 'PHARMACY_SUPPLIED' | 'IMPORTED';
+  }) {
+    const chart = await ensureMedicationChart(args.residentId);
+
+    return prisma.medicationOrder.create({
+      data: {
+        residentId: args.residentId,
+        chartId: chart.id,
+        medicationName: args.medicationName,
+        formulation: args.formulation ?? 'tablet',
+        strength: args.strength ?? '500mg tablet',
+        doseAmount: args.doseAmount ?? '1',
+        doseUnit: args.doseUnit ?? 'tablet',
+        route: args.route ?? 'oral',
+        instructions:
+          args.instructions ?? 'Follow the resident MAR and medicines policy.',
+        startDate: args.startDate ?? startOfToday(),
+        endDate: args.endDate ?? null,
+        isActive: true,
+        isControlledDrug: args.isControlledDrug ?? false,
+        requiresWitness: args.requiresWitness ?? false,
+        isPRN: args.isPRN ?? false,
+        sourceType: args.sourceType ?? 'MANUAL_ENTRY',
+        createdByUserId: nurseUserId,
+        updatedByUserId: nurseUserId,
+      },
+    });
+  }
+
+  async function seedMedicationSchedule(args: {
+    medicationOrderId: string;
+    roundLabel?: 'MORNING' | 'MIDDAY' | 'EVENING' | 'BEDTIME' | 'CUSTOM';
+    anchorType?: 'SHIFT_START' | 'HANDOVER_ACKNOWLEDGED' | 'FIXED_TIME';
+    windowStartOffsetMinutes?: number | null;
+    windowEndOffsetMinutes?: number | null;
+    fixedTimeLocal?: string | null;
+    daysOfWeek?: string[];
+  }) {
+    return prisma.medicationSchedule.create({
+      data: {
+        medicationOrderId: args.medicationOrderId,
+        roundLabel: args.roundLabel ?? 'MORNING',
+        anchorType: args.anchorType ?? 'SHIFT_START',
+        windowStartOffsetMinutes: args.windowStartOffsetMinutes ?? 0,
+        windowEndOffsetMinutes: args.windowEndOffsetMinutes ?? 60,
+        fixedTimeLocal: args.fixedTimeLocal ?? null,
+        daysOfWeek: args.daysOfWeek ?? [],
+        active: true,
+      },
+    });
+  }
+
   beforeEach(async () => {
     await prisma.auditEvent.deleteMany();
+    await prisma.medicationReconciliation.deleteMany();
+    await prisma.medicationStockTransaction.deleteMany();
+    await prisma.medicationAdministrationEvent.deleteMany();
+    await prisma.medicationDoseInstance.deleteMany();
+    await prisma.medicationSchedule.deleteMany();
+    await prisma.pRNProtocol.deleteMany();
+    await prisma.medicationStockRecord.deleteMany();
+    await prisma.medicationAllergyIntolerance.deleteMany();
+    await prisma.medicationChangeLog.deleteMany();
+    await prisma.medicationOrder.deleteMany();
+    await prisma.residentMedicationChart.deleteMany();
     await prisma.handoverAcknowledgement.deleteMany();
     await prisma.incidentMedia.deleteMany();
     await prisma.residentTimelineMedia.deleteMany();
@@ -278,6 +646,13 @@ describe('SerceSync workflow slices (e2e)', () => {
       data: {
         key: 'CARER',
         label: 'Carer',
+      },
+    });
+
+    const nurseRole = await prisma.role.create({
+      data: {
+        key: 'NURSE',
+        label: 'Nurse',
       },
     });
 
@@ -299,12 +674,31 @@ describe('SerceSync workflow slices (e2e)', () => {
       },
     });
 
+    const nurse = await prisma.user.create({
+      data: {
+        email: 'nurse@sercesync.local',
+        displayName: 'Nina Nurse',
+        passwordHash,
+        roleId: nurseRole.id,
+      },
+    });
+    nurseUserId = nurse.id;
+
     await prisma.user.create({
       data: {
         email: 'manager@sercesync.local',
         displayName: 'Morgan Manager',
         passwordHash,
         roleId: managerRole.id,
+      },
+    });
+
+    const mapleCarer = await prisma.user.create({
+      data: {
+        email: 'maple@sercesync.local',
+        displayName: 'Mia Maple',
+        passwordHash,
+        roleId: carerRole.id,
       },
     });
 
@@ -326,41 +720,63 @@ describe('SerceSync workflow slices (e2e)', () => {
           ][index % 4],
           careSummary: careSummaries[index],
           isActive: true,
-          baselinePriority: fullName === 'Raj Patel' ? 'AMBER' : 'GREEN',
+          baselinePriority: fullName === 'Emma Parker' ? 'AMBER' : 'GREEN',
         },
       });
 
       seededResidents.push(resident);
     }
 
-    outOfScopeResident = await prisma.resident.create({
-      data: {
-        fullName: 'Doris Miller',
-        roomNumber: 11,
-        roomLabel: 'Room 11',
-        floorNumber: 2,
-        unitLabel: 'Maple Floor',
-        recognitionImageKey: 'resident-d',
-        careSummary: 'This resident should not appear to a floor one carer.',
-        isActive: true,
-        baselinePriority: 'GREEN',
-      },
-    });
+    const mapleResidents: Resident[] = [];
+    for (const [index, fullName] of mapleResidentNames.entries()) {
+      mapleResidents.push(
+        await prisma.resident.create({
+          data: {
+            fullName,
+            roomNumber: index + 11,
+            roomLabel: `Room ${index + 11}`,
+            floorNumber: 2,
+            unitLabel: 'Maple Floor',
+            recognitionImageKey: [
+              'resident-a',
+              'resident-b',
+              'resident-c',
+              'resident-d',
+            ][index % 4],
+            careSummary: careSummaries[index % careSummaries.length],
+            isActive: true,
+            baselinePriority: 'GREEN',
+          },
+        }),
+      );
+    }
 
-    sameFloorDifferentUnitResident = await prisma.resident.create({
-      data: {
-        fullName: 'Caroline Reed',
-        roomNumber: 12,
-        roomLabel: 'Room 12',
-        floorNumber: 1,
-        unitLabel: 'Cedar Floor',
-        recognitionImageKey: 'resident-c',
-        careSummary:
-          'Should only appear in the Cedar Floor manager dashboard scope.',
-        isActive: true,
-        baselinePriority: 'GREEN',
-      },
-    });
+    const cedarResidents: Resident[] = [];
+    for (const [index, fullName] of cedarResidentNames.entries()) {
+      cedarResidents.push(
+        await prisma.resident.create({
+          data: {
+            fullName,
+            roomNumber: index + 21,
+            roomLabel: `Room ${index + 21}`,
+            floorNumber: 3,
+            unitLabel: 'Cedar Floor',
+            recognitionImageKey: [
+              'resident-a',
+              'resident-b',
+              'resident-c',
+              'resident-d',
+            ][index % 4],
+            careSummary: careSummaries[index % careSummaries.length],
+            isActive: true,
+            baselinePriority: 'GREEN',
+          },
+        }),
+      );
+    }
+
+    outOfScopeResident = mapleResidents[0];
+    cedarFloorResident = cedarResidents[0];
 
     const now = new Date();
     const shiftStartsAt = new Date(now.getTime() - 60 * 60 * 1000);
@@ -375,20 +791,32 @@ describe('SerceSync workflow slices (e2e)', () => {
         floorNumber: 1,
         unitLabel: 'Willow Floor',
         assignedUsers: {
-          connect: {
-            id: carer.id,
-          },
+          connect: [{ id: carer.id }, { id: nurse.id }],
         },
       },
     });
 
-    secondaryActiveShift = await prisma.shift.create({
+    mapleActiveShift = await prisma.shift.create({
       data: {
-        name: 'Cedar Support Shift',
+        name: 'Maple Day Shift',
         startsAt: new Date(now.getTime() - 30 * 60 * 1000),
         endsAt: new Date(now.getTime() + 6 * 60 * 60 * 1000),
         status: 'ACTIVE',
-        floorNumber: 1,
+        floorNumber: 2,
+        unitLabel: 'Maple Floor',
+        assignedUsers: {
+          connect: [{ id: mapleCarer.id }],
+        },
+      },
+    });
+
+    cedarActiveShift = await prisma.shift.create({
+      data: {
+        name: 'Cedar Support Shift',
+        startsAt: new Date(now.getTime() - 15 * 60 * 1000),
+        endsAt: new Date(now.getTime() + 5 * 60 * 60 * 1000),
+        status: 'ACTIVE',
+        floorNumber: 3,
         unitLabel: 'Cedar Floor',
       },
     });
@@ -430,7 +858,7 @@ describe('SerceSync workflow slices (e2e)', () => {
         shiftId: activeShift.id,
         createdById: carer.id,
         summary:
-          'Margaret Evans needs an early hydration check and Raj Patel has an observation follow-up before lunch.',
+          'Margaret Evans needs an early hydration check and Emma Parker has an observation follow-up before lunch.',
       },
     });
 
@@ -442,6 +870,8 @@ describe('SerceSync workflow slices (e2e)', () => {
           title: 'Hydration encouragement logged',
           details:
             'Encouraged fluids and recorded intake with the breakfast check.',
+          mealType: 'BREAKFAST',
+          mealIntakeAmount: 'MOST',
           createdById: carer.id,
           shiftId: activeShift.id,
           createdAt: new Date(now.getTime() - 30 * 60 * 1000),
@@ -468,6 +898,26 @@ describe('SerceSync workflow slices (e2e)', () => {
           shiftId: activeShift.id,
           createdAt: new Date(now.getTime() - 75 * 60 * 1000),
         },
+        {
+          residentId: outOfScopeResident.id,
+          type: 'OBSERVATION',
+          title: 'Maple reassurance round logged',
+          details:
+            'Settled after reassurance and stayed comfortable in the lounge.',
+          createdById: mapleCarer.id,
+          shiftId: mapleActiveShift.id,
+          createdAt: new Date(now.getTime() - 18 * 60 * 1000),
+        },
+        {
+          residentId: cedarFloorResident.id,
+          type: 'MOBILITY_REPOSITIONING',
+          title: 'Transfer comfort reviewed',
+          details:
+            'Comfort check completed after transfer support with pain monitoring to continue.',
+          createdById: carer.id,
+          shiftId: cedarActiveShift.id,
+          createdAt: new Date(now.getTime() - 14 * 60 * 1000),
+        },
       ],
     });
 
@@ -479,6 +929,8 @@ describe('SerceSync workflow slices (e2e)', () => {
           residentId: seededResidents[0].id,
           title: 'Hydration round for Margaret Evans',
           description: 'Confirm hydration before breakfast.',
+          focus: 'HYDRATION',
+          clinicalPriority: 'ROUTINE',
           status: 'PENDING',
           dueAt: new Date(now.getTime() + 30 * 60 * 1000),
           assignedUserId: carer.id,
@@ -490,8 +942,10 @@ describe('SerceSync workflow slices (e2e)', () => {
         data: {
           shiftId: activeShift.id,
           residentId: seededResidents[1].id,
-          title: 'Observation follow-up for Raj Patel',
+          title: 'Observation follow-up for Emma Parker',
           description: 'Repeat observations before lunch.',
+          focus: 'OBSERVATION',
+          clinicalPriority: 'ROUTINE',
           status: 'PENDING',
           dueAt: new Date(now.getTime() + 90 * 60 * 1000),
           assignedUserId: carer.id,
@@ -503,11 +957,43 @@ describe('SerceSync workflow slices (e2e)', () => {
         data: {
           shiftId: activeShift.id,
           residentId: seededResidents[2].id,
-          title: 'Repositioning check for Edith Turner',
+          title: 'Repositioning check for Elliot Turner',
           description: 'Review comfort positioning before the next round.',
+          focus: 'MOBILITY',
+          clinicalPriority: 'ROUTINE',
           status: 'PENDING',
           dueAt: new Date(now.getTime() - 10 * 60 * 1000),
           assignedUserId: carer.id,
+        },
+      }),
+    );
+    seededTasks.push(
+      await prisma.task.create({
+        data: {
+          shiftId: activeShift.id,
+          residentId: seededResidents[1].id,
+          title: 'Medication round for Emma Parker',
+          description: 'Time-critical morning medications are due soon.',
+          focus: 'MEDICATION',
+          clinicalPriority: 'TIME_CRITICAL',
+          status: 'PENDING',
+          dueAt: new Date(now.getTime() + 25 * 60 * 1000),
+          assignedUserId: nurse.id,
+        },
+      }),
+    );
+    seededTasks.push(
+      await prisma.task.create({
+        data: {
+          shiftId: activeShift.id,
+          residentId: seededResidents[4].id,
+          title: 'Medication follow-up for Amir Hussain',
+          description: 'Overdue analgesia review still needs documenting.',
+          focus: 'MEDICATION',
+          clinicalPriority: 'PRIORITY',
+          status: 'PENDING',
+          dueAt: new Date(now.getTime() - 18 * 60 * 1000),
+          assignedUserId: nurse.id,
         },
       }),
     );
@@ -543,18 +1029,33 @@ describe('SerceSync workflow slices (e2e)', () => {
       }),
     };
 
-    secondaryUnitIncident = await prisma.incident.create({
+    mapleFloorIncident = await prisma.incident.create({
       data: {
-        residentId: sameFloorDifferentUnitResident.id,
-        shiftId: secondaryActiveShift.id,
+        residentId: outOfScopeResident.id,
+        shiftId: mapleActiveShift.id,
+        createdById: mapleCarer.id,
+        severity: 'AMBER',
+        status: 'OPEN',
+        category: 'OTHER',
+        title: 'Maple Floor reassurance call',
+        details:
+          'Should only surface in the global dashboard because the floor is active.',
+        occurredAt: new Date(now.getTime() - 9 * 60 * 1000),
+      },
+    });
+
+    cedarFloorIncident = await prisma.incident.create({
+      data: {
+        residentId: cedarFloorResident.id,
+        shiftId: cedarActiveShift.id,
         createdById: carer.id,
         severity: 'RED',
         status: 'OPEN',
         category: 'BEHAVIOUR',
-        title: 'Distress episode in Cedar corridor',
+        title: 'Cedar distress episode',
         details:
-          'Should only appear when the Cedar Floor dashboard scope is selected.',
-        occurredAt: new Date(now.getTime() - 12 * 60 * 1000),
+          'Should only surface in the global dashboard because the floor is active.',
+        occurredAt: new Date(now.getTime() - 7 * 60 * 1000),
       },
     });
   });
@@ -603,7 +1104,7 @@ describe('SerceSync workflow slices (e2e)', () => {
     const loginResponse = await loginManagerBrowser('manager@sercesync.local');
     const sessionCookie = loginResponse.headers['set-cookie'];
 
-    expect(loginResponse.body.accessToken).toBeUndefined();
+    expect(loginResponse.body.accessToken).toEqual(expect.any(String));
     expect(loginResponse.body.user.email).toBe('manager@sercesync.local');
     expect(sessionCookie).toEqual(
       expect.arrayContaining([
@@ -628,6 +1129,7 @@ describe('SerceSync workflow slices (e2e)', () => {
       email: 'manager@sercesync.local',
       role: 'MANAGER',
     });
+    expect(sessionResponse.body.accessToken).toEqual(expect.any(String));
 
     const shiftsResponse = typedResponse<ManagerShiftsResponse>(
       await request(app.getHttpServer())
@@ -636,7 +1138,7 @@ describe('SerceSync workflow slices (e2e)', () => {
         .expect(200),
     );
 
-    expect(shiftsResponse.body.activeShifts).toHaveLength(2);
+    expect(shiftsResponse.body.activeShifts).toHaveLength(3);
 
     const logoutResponse = typedResponse<LogoutResponse>(
       await request(app.getHttpServer())
@@ -653,6 +1155,50 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
   });
 
+  it('returns all thirty seeded residents to the manager in floor and room order', async () => {
+    const accessToken = await login('manager@sercesync.local');
+
+    const residentsResponse = typedResponse<ManagerResidentsResponse>(
+      await request(app.getHttpServer())
+        .get('/manager/residents')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200),
+    );
+
+    expect(residentsResponse.body.residents).toHaveLength(30);
+    expect(residentsResponse.body.residents[0]).toMatchObject({
+      fullName: 'Margaret Evans',
+      roomNumber: 1,
+      roomLabel: 'Room 1',
+      floorNumber: 1,
+      unitLabel: 'Willow Floor',
+    });
+    expect(residentsResponse.body.residents[9]).toMatchObject({
+      fullName: 'Lily Bennett',
+      roomNumber: 10,
+      floorNumber: 1,
+      unitLabel: 'Willow Floor',
+    });
+    expect(residentsResponse.body.residents[10]).toMatchObject({
+      fullName: 'Daniel Miller',
+      roomNumber: 11,
+      floorNumber: 2,
+      unitLabel: 'Maple Floor',
+    });
+    expect(residentsResponse.body.residents[20]).toMatchObject({
+      fullName: 'Agnes Cook',
+      roomNumber: 21,
+      floorNumber: 3,
+      unitLabel: 'Cedar Floor',
+    });
+    expect(residentsResponse.body.residents[29]).toMatchObject({
+      fullName: 'Ryan Coleman',
+      roomNumber: 30,
+      floorNumber: 3,
+      unitLabel: 'Cedar Floor',
+    });
+  });
+
   it('completes the task accountability flow for the active shift', async () => {
     const accessToken = await login('carer@sercesync.local');
 
@@ -664,6 +1210,9 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
 
     expect(tasksResponse.body.tasks).toHaveLength(3);
+    expect(
+      tasksResponse.body.tasks.filter((task) => task.focus === 'MEDICATION'),
+    ).toHaveLength(0);
 
     await request(app.getHttpServer())
       .post(`/tasks/${seededTasks[0].id}/complete`)
@@ -697,7 +1246,16 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
 
     expect(refreshedTasksResponse.body.tasks).toHaveLength(1);
-    expect(refreshedTasksResponse.body.tasks[0].status).toBe('ESCALATED');
+    expect(
+      refreshedTasksResponse.body.tasks.filter(
+        (task) => task.status === 'ESCALATED',
+      ),
+    ).toHaveLength(1);
+    expect(
+      refreshedTasksResponse.body.tasks.filter(
+        (task) => task.focus === 'MEDICATION',
+      ),
+    ).toHaveLength(0);
 
     const auditEvents = await prisma.auditEvent.findMany({
       where: {
@@ -708,6 +1266,110 @@ describe('SerceSync workflow slices (e2e)', () => {
     });
 
     expect(auditEvents).toHaveLength(3);
+  });
+
+  it('allows only nurses to update medication tasks', async () => {
+    const carerAccessToken = await login('carer@sercesync.local');
+
+    const currentTasksResponse = typedResponse<TasksCurrentResponse>(
+      await request(app.getHttpServer())
+        .get('/tasks/current')
+        .set('Authorization', `Bearer ${carerAccessToken}`)
+        .expect(200),
+    );
+
+    expect(
+      currentTasksResponse.body.tasks.filter(
+        (task) => task.focus === 'MEDICATION',
+      ),
+    ).toHaveLength(0);
+
+    const forbiddenResponse = typedResponse<{
+      message: string;
+      code: string;
+    }>(
+      await request(app.getHttpServer())
+        .post(`/tasks/${seededTasks[3].id}/complete`)
+        .set('Authorization', `Bearer ${carerAccessToken}`)
+        .send({
+          note: 'Attempted by carer without nurse access.',
+        })
+        .expect(403),
+    );
+
+    expect(forbiddenResponse.body).toMatchObject({
+      message: 'Only nurses can administer medication.',
+      code: 'MEDICATION_NURSE_REQUIRED',
+    });
+
+    const medicationTaskToEscalate = await prisma.task.create({
+      data: {
+        shiftId: activeShift.id,
+        residentId: seededResidents[5].id,
+        title: 'Medication review for Sheila Morgan',
+        description: 'Escalate the medication concern to the clinician.',
+        focus: 'MEDICATION',
+        clinicalPriority: 'PRIORITY',
+        status: 'PENDING',
+        dueAt: new Date(Date.now() + 45 * 60 * 1000),
+        assignedUserId: nurseUserId,
+      },
+    });
+
+    const nurseAccessToken = await login('nurse@sercesync.local');
+    const nurseCurrentTasksResponse = typedResponse<TasksCurrentResponse>(
+      await request(app.getHttpServer())
+        .get('/tasks/current')
+        .set('Authorization', `Bearer ${nurseAccessToken}`)
+        .expect(200),
+    );
+
+    expect(
+      nurseCurrentTasksResponse.body.tasks.filter(
+        (task) => task.focus === 'MEDICATION',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: seededTasks[3].id,
+          canComplete: true,
+          canDefer: true,
+          canEscalate: true,
+          actionRestrictionReason: null,
+        }),
+        expect.objectContaining({
+          id: seededTasks[4].id,
+          canComplete: true,
+          canDefer: true,
+          canEscalate: true,
+          actionRestrictionReason: null,
+        }),
+      ]),
+    );
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${seededTasks[3].id}/complete`)
+      .set('Authorization', `Bearer ${nurseAccessToken}`)
+      .send({
+        note: 'Medication given and documented by the nurse.',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${seededTasks[4].id}/defer`)
+      .set('Authorization', `Bearer ${nurseAccessToken}`)
+      .send({
+        reason: 'Resident requested a short delay before taking medication.',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/tasks/${medicationTaskToEscalate.id}/escalate`)
+      .set('Authorization', `Bearer ${nurseAccessToken}`)
+      .send({
+        reason: 'Clinical review is required before the next medication round.',
+      })
+      .expect(201);
   });
 
   it('returns residents with derived priority state and active incidents on detail', async () => {
@@ -721,13 +1383,13 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
 
     const raj = residentsResponse.body.residents.find(
-      (resident) => resident.fullName === 'Raj Patel',
+      (resident) => resident.fullName === 'Emma Parker',
     );
     const edith = residentsResponse.body.residents.find(
-      (resident) => resident.fullName === 'Edith Turner',
+      (resident) => resident.fullName === 'Elliot Turner',
     );
     const thomas = residentsResponse.body.residents.find(
-      (resident) => resident.fullName === 'Thomas Green',
+      (resident) => resident.fullName === 'Thea Green',
     );
     const margaret = residentsResponse.body.residents.find(
       (resident) => resident.fullName === 'Margaret Evans',
@@ -780,6 +1442,50 @@ describe('SerceSync workflow slices (e2e)', () => {
           entry.personalCareSubtype === 'SHOWER',
       ),
     ).toBe(true);
+
+    const rajResidentDetailResponse = typedResponse<ResidentDetailResponse>(
+      await request(app.getHttpServer())
+        .get(`/residents/${seededResidents[1].id}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200),
+    );
+
+    expect(rajResidentDetailResponse.body.medicationSummary).toMatchObject({
+      total: 0,
+      overdue: 0,
+      dueWithinHour: 0,
+      highPriority: 0,
+    });
+    expect(
+      rajResidentDetailResponse.body.currentTasks.filter(
+        (task) => task.focus === 'MEDICATION',
+      ),
+    ).toHaveLength(0);
+
+    const nurseAccessToken = await login('nurse@sercesync.local');
+    const rajResidentDetailForNurseResponse =
+      typedResponse<ResidentDetailResponse>(
+        await request(app.getHttpServer())
+          .get(`/residents/${seededResidents[1].id}`)
+          .set('Authorization', `Bearer ${nurseAccessToken}`)
+          .expect(200),
+      );
+
+    expect(
+      rajResidentDetailForNurseResponse.body.medicationSummary,
+    ).toMatchObject({
+      total: 1,
+      overdue: 0,
+      dueWithinHour: 1,
+      highPriority: 1,
+    });
+    expect(rajResidentDetailForNurseResponse.body.currentTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          focus: 'MEDICATION',
+        }),
+      ]),
+    );
   });
 
   it('creates a personal-care note with subtype and rejects invalid subtype combinations', async () => {
@@ -828,6 +1534,97 @@ describe('SerceSync workflow slices (e2e)', () => {
         type: 'OBSERVATION',
         personalCareSubtype: 'SKIN_CARE',
         details: 'Observation note should not accept a personal-care subtype.',
+      })
+      .expect(400);
+  });
+
+  it('allows only nurses to create medication notes for residents', async () => {
+    const carerAccessToken = await login('carer@sercesync.local');
+
+    const forbiddenResponse = typedResponse<{
+      message: string;
+      code: string;
+    }>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[1].id}/timeline`)
+        .set('Authorization', `Bearer ${carerAccessToken}`)
+        .send({
+          type: 'MEDICATION_NOTE',
+          details: 'Medication withheld pending swallow review.',
+        })
+        .expect(403),
+    );
+
+    expect(forbiddenResponse.body).toMatchObject({
+      message: 'Only nurses can add medication notes.',
+      code: 'MEDICATION_NOTE_NURSE_REQUIRED',
+    });
+
+    const nurseAccessToken = await login('nurse@sercesync.local');
+    const successResponse = typedResponse<ResidentTimelineWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[1].id}/timeline`)
+        .set('Authorization', `Bearer ${nurseAccessToken}`)
+        .send({
+          type: 'MEDICATION_NOTE',
+          details: 'Medication administered and tolerance recorded.',
+        })
+        .expect(201),
+    );
+
+    expect(successResponse.body.entry.type).toBe('MEDICATION_NOTE');
+  });
+
+  it('creates structured meal intake notes and rejects invalid meal payloads', async () => {
+    const accessToken = await login('carer@sercesync.local');
+
+    const successResponse = typedResponse<ResidentTimelineWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[4].id}/timeline`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          type: 'NUTRITION_HYDRATION',
+          mealType: 'LUNCH',
+          mealIntakeAmount: 'HALF',
+        })
+        .expect(201),
+    );
+
+    expect(successResponse.body.entry.type).toBe('NUTRITION_HYDRATION');
+    expect(successResponse.body.entry.mealType).toBe('LUNCH');
+    expect(successResponse.body.entry.mealIntakeAmount).toBe('HALF');
+
+    const createdEntry = await prisma.residentTimelineEntry.findFirstOrThrow({
+      where: {
+        residentId: seededResidents[4].id,
+        mealType: 'LUNCH',
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    expect(createdEntry.mealIntakeAmount).toBe('HALF');
+    expect(createdEntry.details).toBe('No additional concerns noted.');
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[4].id}/timeline`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        type: 'OBSERVATION',
+        mealType: 'DINNER',
+        mealIntakeAmount: 'MOST',
+        details: 'Meal data should not be allowed on an observation.',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[4].id}/timeline`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        type: 'NUTRITION_HYDRATION',
+        mealType: 'DINNER',
+        details: 'Partial meal payload should be rejected.',
       })
       .expect(400);
   });
@@ -890,16 +1687,48 @@ describe('SerceSync workflow slices (e2e)', () => {
       .expect(404);
   });
 
-  it('requires an explicit active shift when loading the manager dashboard', async () => {
+  it('loads a global manager dashboard across all active shifts by default', async () => {
     const accessToken = await login('manager@sercesync.local');
 
-    await request(app.getHttpServer())
-      .get('/manager/dashboard')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .expect(400);
+    const dashboardResponse = typedResponse<ManagerDashboardResponse>(
+      await request(app.getHttpServer())
+        .get('/manager/dashboard')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200),
+    );
+
+    expect(dashboardResponse.body.activeShift.id).toBe(cedarActiveShift.id);
+    expect(dashboardResponse.body.metrics.activeIncidents).toBe(4);
+    expect(
+      dashboardResponse.body.exceptionFeed.map(
+        (item: { id: string }) => item.id,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        seededIncidents.red.id,
+        seededIncidents.amber.id,
+        cedarFloorIncident.id,
+      ]),
+    );
+    expect(
+      dashboardResponse.body.exceptionFeed.some(
+        (item: { kind: string }) => item.kind === 'TASK',
+      ),
+    ).toBe(true);
+    expect(
+      dashboardResponse.body.medicationOverview?.exceptions.every(
+        (item: { id: string; doseInstanceId: string }) =>
+          item.id === item.doseInstanceId,
+      ) ?? false,
+    ).toBe(true);
+    expect(
+      dashboardResponse.body.exceptionFeed.map(
+        (item: { shiftId: string }) => item.shiftId,
+      ),
+    ).toEqual(expect.arrayContaining([activeShift.id, cedarActiveShift.id]));
   });
 
-  it('lists active shifts and scopes dashboard incidents to the selected unit', async () => {
+  it('lists active shifts and returns a focused dashboard for the selected shift', async () => {
     const accessToken = await login('manager@sercesync.local');
 
     const activeShiftsResponse = typedResponse<ManagerShiftsResponse>(
@@ -909,66 +1738,81 @@ describe('SerceSync workflow slices (e2e)', () => {
         .expect(200),
     );
 
-    expect(activeShiftsResponse.body.activeShifts).toHaveLength(2);
+    expect(activeShiftsResponse.body.activeShifts).toHaveLength(3);
     expect(
       activeShiftsResponse.body.activeShifts.map(
         (shift: { id: string }) => shift.id,
       ),
-    ).toEqual([secondaryActiveShift.id, activeShift.id]);
+    ).toEqual([cedarActiveShift.id, mapleActiveShift.id, activeShift.id]);
 
-    const dashboardResponse = typedResponse<ManagerDashboardResponse>(
-      await request(app.getHttpServer())
-        .get('/manager/dashboard')
-        .query({ shiftId: activeShift.id })
-        .set('Authorization', `Bearer ${accessToken}`)
-        .expect(200),
+    const selectedShiftDashboardResponse =
+      typedResponse<ManagerDashboardResponse>(
+        await request(app.getHttpServer())
+          .get('/manager/dashboard')
+          .query({ shiftId: activeShift.id })
+          .set('Authorization', `Bearer ${accessToken}`)
+          .expect(200),
+      );
+
+    expect(selectedShiftDashboardResponse.body.activeShift.id).toBe(
+      activeShift.id,
     );
-
-    expect(dashboardResponse.body.activeShift.id).toBe(activeShift.id);
-    expect(dashboardResponse.body.metrics.activeIncidents).toBe(2);
-    expect(dashboardResponse.body.exceptionFeed).toHaveLength(5);
-    expect(dashboardResponse.body.exceptionFeed[0]).toMatchObject({
+    expect(selectedShiftDashboardResponse.body.metrics.activeIncidents).toBe(2);
+    expect(selectedShiftDashboardResponse.body.exceptionFeed).toHaveLength(5);
+    expect(selectedShiftDashboardResponse.body.exceptionFeed[0]).toMatchObject({
       kind: 'INCIDENT',
       id: seededIncidents.red.id,
+      shiftId: activeShift.id,
+      floorNumber: 1,
+      unitLabel: 'Willow Floor',
+      roomLabel: seededResidents[3].roomLabel,
       status: 'OPEN',
       severity: 'RED',
       canAcknowledge: true,
       canResolve: false,
     });
-    expect(dashboardResponse.body.exceptionFeed[1]).toMatchObject({
+    expect(selectedShiftDashboardResponse.body.exceptionFeed[1]).toMatchObject({
       kind: 'INCIDENT',
       id: seededIncidents.amber.id,
+      shiftId: activeShift.id,
+      floorNumber: 1,
+      unitLabel: 'Willow Floor',
+      roomLabel: seededResidents[2].roomLabel,
       status: 'OPEN',
       severity: 'AMBER',
       canAcknowledge: true,
       canResolve: false,
     });
     expect(
-      dashboardResponse.body.exceptionFeed.findIndex(
+      selectedShiftDashboardResponse.body.exceptionFeed.findIndex(
         (item: { kind: string; id: string }) => item.kind === 'TASK',
       ),
     ).toBeGreaterThan(1);
     expect(
-      dashboardResponse.body.exceptionFeed.some(
-        (item: { id: string }) => item.id === secondaryUnitIncident.id,
+      selectedShiftDashboardResponse.body.exceptionFeed.some(
+        (item: { id: string }) => item.id === cedarFloorIncident.id,
       ),
     ).toBe(false);
 
     const secondaryDashboardResponse = typedResponse<ManagerDashboardResponse>(
       await request(app.getHttpServer())
         .get('/manager/dashboard')
-        .query({ shiftId: secondaryActiveShift.id })
+        .query({ shiftId: cedarActiveShift.id })
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200),
     );
 
     expect(secondaryDashboardResponse.body.activeShift.id).toBe(
-      secondaryActiveShift.id,
+      cedarActiveShift.id,
     );
     expect(secondaryDashboardResponse.body.metrics.activeIncidents).toBe(1);
     expect(secondaryDashboardResponse.body.exceptionFeed[0]).toMatchObject({
       kind: 'INCIDENT',
-      id: secondaryUnitIncident.id,
+      id: cedarFloorIncident.id,
+      shiftId: cedarActiveShift.id,
+      floorNumber: 3,
+      unitLabel: 'Cedar Floor',
+      roomLabel: cedarFloorResident.roomLabel,
       severity: 'RED',
     });
   });
@@ -1010,6 +1854,9 @@ describe('SerceSync workflow slices (e2e)', () => {
           title: 'Personal Care · Continence',
           residentName: seededResidents[1].fullName,
           roomLabel: seededResidents[1].roomLabel,
+          floorNumber: 1,
+          unitLabel: 'Willow Floor',
+          shiftId: activeShift.id,
           description: 'Continence support provided and fresh pads applied.',
           actorName: 'Alex Carer',
           badge: 'PERSONAL CARE',
@@ -1019,6 +1866,9 @@ describe('SerceSync workflow slices (e2e)', () => {
           title: seededTasks[0].title,
           residentName: seededResidents[0].fullName,
           roomLabel: seededResidents[0].roomLabel,
+          floorNumber: 1,
+          unitLabel: 'Willow Floor',
+          shiftId: activeShift.id,
           description: 'Hydration round completed and fluids encouraged.',
           actorName: 'Alex Carer',
           badge: 'COMPLETED',
@@ -1140,6 +1990,72 @@ describe('SerceSync workflow slices (e2e)', () => {
     );
   });
 
+  it('broadcasts shift dashboard updates when that active shift changes', async () => {
+    const streamService = app.get(ManagerDashboardStreamService);
+
+    const payloadPromise = new Promise<{
+      connected: {
+        type: string;
+        shiftId: string;
+        reason: string;
+      };
+      updated: {
+        type: string;
+        shiftId: string;
+        reason: string;
+      };
+    }>((resolve, reject) => {
+      const events: Array<{
+        type: string;
+        shiftId: string;
+        reason: string;
+      }> = [];
+
+      streamService.streamForShift(mapleActiveShift.id).subscribe({
+        next: (event) => {
+          events.push(
+            event.data as {
+              type: string;
+              shiftId: string;
+              reason: string;
+            },
+          );
+
+          if (events.length === 2) {
+            resolve({
+              connected: {
+                type: events[0].type,
+                shiftId: events[0].shiftId,
+                reason: events[0].reason,
+              },
+              updated: {
+                type: events[1].type,
+                shiftId: events[1].shiftId,
+                reason: events[1].reason,
+              },
+            });
+          }
+        },
+        error: reject,
+      });
+    });
+
+    streamService.publishShiftUpdate(mapleActiveShift.id, 'incident-created');
+
+    const payloads = await payloadPromise;
+
+    expect(payloads.connected).toMatchObject({
+      type: 'stream.connected',
+      shiftId: mapleActiveShift.id,
+      reason: 'connected',
+    });
+    expect(payloads.updated).toMatchObject({
+      type: 'dashboard.updated',
+      shiftId: mapleActiveShift.id,
+      reason: 'incident-created',
+    });
+  });
+
   it('allows only one concurrent manager transition per incident status change', async () => {
     const carerToken = await login('carer@sercesync.local');
     const managerToken = await login('manager@sercesync.local');
@@ -1241,7 +2157,7 @@ describe('SerceSync workflow slices (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/manager/incidents/${seededIncidents.red.id}/acknowledge`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ shiftId: secondaryActiveShift.id })
+      .send({ shiftId: cedarActiveShift.id })
       .expect(404);
   });
 
@@ -1258,8 +2174,8 @@ describe('SerceSync workflow slices (e2e)', () => {
           floorNumber: 3,
           unitLabel: 'Cedar Floor',
           recognitionImageKey: 'resident-b',
-          careSummary:
-            'New resident with mobility prompts and hydration checks.',
+          aboutMe:
+            'Needs mobility prompts, prefers calm pacing, and responds well to hydration reminders.',
           baselinePriority: 'AMBER',
           isActive: true,
         })
@@ -1271,6 +2187,8 @@ describe('SerceSync workflow slices (e2e)', () => {
       roomLabel: 'Room 31',
       floorNumber: 3,
       unitLabel: 'Cedar Floor',
+      aboutMe:
+        'Needs mobility prompts, prefers calm pacing, and responds well to hydration reminders.',
       baselinePriority: 'AMBER',
       effectivePriority: 'AMBER',
       prioritySource: 'BASELINE',
@@ -1285,7 +2203,8 @@ describe('SerceSync workflow slices (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .send({
           roomNumber: 32,
-          careSummary: 'Updated resident summary with clearer care priorities.',
+          aboutMe:
+            'Prefers clear introductions, calm pacing, and a little extra reassurance before mobility support.',
           baselinePriority: 'GREEN',
           isActive: false,
         })
@@ -1295,6 +2214,8 @@ describe('SerceSync workflow slices (e2e)', () => {
     expect(editResponse.body.resident).toMatchObject({
       roomNumber: 32,
       roomLabel: 'Room 32',
+      aboutMe:
+        'Prefers clear introductions, calm pacing, and a little extra reassurance before mobility support.',
       baselinePriority: 'GREEN',
       effectivePriority: 'GREEN',
       isActive: false,
@@ -1309,11 +2230,11 @@ describe('SerceSync workflow slices (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         fullName: '   ',
-        roomNumber: 45,
-        floorNumber: 4,
+        roomNumber: 33,
+        floorNumber: 3,
         unitLabel: 'Cedar Floor',
         recognitionImageKey: 'resident-a',
-        careSummary: 'Valid summary',
+        aboutMe: 'Prefers simple routines and gentle prompts.',
         baselinePriority: 'GREEN',
         isActive: true,
       })
@@ -1325,11 +2246,12 @@ describe('SerceSync workflow slices (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .send({
           fullName: 'Helen Morris',
-          roomNumber: 46,
-          floorNumber: 4,
+          roomNumber: 34,
+          floorNumber: 3,
           unitLabel: 'Cedar Floor',
           recognitionImageKey: 'resident-b',
-          careSummary: 'Valid summary for update validation coverage.',
+          aboutMe:
+            'Likes clear explanations, warm drinks, and a steady routine.',
           baselinePriority: 'GREEN',
           isActive: true,
         })
@@ -1342,7 +2264,7 @@ describe('SerceSync workflow slices (e2e)', () => {
       .patch(`/manager/residents/${residentId}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        careSummary: '   ',
+        aboutMe: '   ',
       })
       .expect(400);
 
@@ -1353,7 +2275,10 @@ describe('SerceSync workflow slices (e2e)', () => {
     });
 
     expect(resident.careSummary).toBe(
-      'Valid summary for update validation coverage.',
+      'Likes clear explanations, warm drinks, and a steady routine.',
+    );
+    expect(resident.aboutMe).toBe(
+      'Likes clear explanations, warm drinks, and a steady routine.',
     );
   });
 
@@ -1392,7 +2317,7 @@ describe('SerceSync workflow slices (e2e)', () => {
       .expect(404);
   });
 
-  it('returns a live shift overview with current and upcoming assignments', async () => {
+  it('returns a live shift overview for the current shift only', async () => {
     const accessToken = await login('carer@sercesync.local');
 
     const overviewResponse = typedResponse<ShiftOverviewResponse>(
@@ -1407,11 +2332,982 @@ describe('SerceSync workflow slices (e2e)', () => {
       floorNumber: 1,
       unitLabel: 'Willow Floor',
     });
-    expect(overviewResponse.body.assignments).toHaveLength(3);
-    expect(overviewResponse.body.assignments[1]).toMatchObject({
-      name: 'Tomorrow Care Shift',
-      status: 'PLANNED',
+    expect(overviewResponse.body).not.toHaveProperty('assignments');
+    expect(overviewResponse.body.medicationSummary).toMatchObject({
+      total: 0,
+      overdue: 0,
+      dueWithinHour: 0,
+      highPriority: 0,
     });
+
+    const nurseAccessToken = await login('nurse@sercesync.local');
+    const nurseOverviewResponse = typedResponse<ShiftOverviewResponse>(
+      await request(app.getHttpServer())
+        .get('/shifts/my')
+        .set('Authorization', `Bearer ${nurseAccessToken}`)
+        .expect(200),
+    );
+
+    expect(nurseOverviewResponse.body.medicationSummary).toMatchObject({
+      total: 2,
+      overdue: 1,
+      dueWithinHour: 1,
+      highPriority: 2,
+    });
+  });
+
+  it('creates a medication chart, scheduled order, schedule, allergy, and change history on the resident eMAR', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const nurseToken = await login('nurse@sercesync.local');
+
+    const createOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[0].id}/medications`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          medicationName: 'Paracetamol',
+          formulation: 'tablet',
+          strength: '500mg tablet',
+          doseAmount: '1',
+          doseUnit: 'tablet',
+          route: 'oral',
+          instructions: 'Give with water following the current MAR.',
+          startDate: startOfToday().toISOString(),
+          sourceType: 'MANUAL_ENTRY',
+          changeReason: 'Initial medication chart order.',
+        })
+        .expect(201),
+    );
+
+    const medicationOrderId = createOrderResponse.body.medicationOrder.id;
+    expect(createOrderResponse.body.medicationOrder).toMatchObject({
+      medicationName: 'Paracetamol',
+      isPRN: false,
+    });
+
+    const chartCount = await prisma.residentMedicationChart.count({
+      where: {
+        residentId: seededResidents[0].id,
+        status: 'ACTIVE',
+      },
+    });
+    expect(chartCount).toBe(1);
+
+    const updateOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .patch(`/medications/${medicationOrderId}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          instructions:
+            'Give with water after breakfast following the current MAR.',
+          reason: 'Clarified administration timing for the morning round.',
+        })
+        .expect(200),
+    );
+    expect(updateOrderResponse.body.medicationOrder.medicationName).toBe(
+      'Paracetamol',
+    );
+
+    const createScheduleResponse =
+      typedResponse<MedicationScheduleWriteResponse>(
+        await request(app.getHttpServer())
+          .post(`/medications/${medicationOrderId}/schedules`)
+          .set('Authorization', `Bearer ${managerToken}`)
+          .send({
+            roundLabel: 'MORNING',
+            anchorType: 'HANDOVER_ACKNOWLEDGED',
+            windowStartOffsetMinutes: 0,
+            windowEndOffsetMinutes: 60,
+          })
+          .expect(201),
+      );
+    expect(createScheduleResponse.body.schedule).toMatchObject({
+      roundLabel: 'MORNING',
+      anchorType: 'HANDOVER_ACKNOWLEDGED',
+    });
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[0].id}/medication-allergies`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        substance: 'Penicillin',
+        reaction: 'Rash',
+        severity: 'Moderate',
+      })
+      .expect(201);
+
+    const emarResponse = typedResponse<ResidentEmarResponse>(
+      await request(app.getHttpServer())
+        .get(`/residents/${seededResidents[0].id}/emar`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(200),
+    );
+
+    expect(emarResponse.body.chart.status).toBe('ACTIVE');
+    expect(emarResponse.body.allergies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          substance: 'Penicillin',
+          reaction: 'Rash',
+          severity: 'Moderate',
+        }),
+      ]),
+    );
+    expect(emarResponse.body.scheduledMedications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: medicationOrderId,
+          medicationName: 'Paracetamol',
+          isPRN: false,
+          schedules: [
+            expect.objectContaining({
+              id: createScheduleResponse.body.schedule.id,
+              roundLabel: 'MORNING',
+              anchorType: 'HANDOVER_ACKNOWLEDGED',
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(
+      emarResponse.body.changeHistory.map((entry) => entry.changeType),
+    ).toEqual(
+      expect.arrayContaining(['CREATED', 'UPDATED', 'SCHEDULE_CHANGED']),
+    );
+  });
+
+  it('creates a PRN medication order and protocol, shows it on profile, and excludes it from timed medication rounds', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const nurseToken = await login('nurse@sercesync.local');
+
+    const createPrnOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[1].id}/medications`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          medicationName: 'Paracetamol',
+          formulation: 'oral suspension',
+          strength: '250mg/5ml',
+          doseAmount: '10',
+          doseUnit: 'ml',
+          route: 'oral',
+          instructions: 'Offer when pain is reported or observed.',
+          startDate: startOfToday().toISOString(),
+          isPRN: true,
+          sourceType: 'MANUAL_ENTRY',
+          changeReason: 'PRN support order for the medication workflow.',
+        })
+        .expect(201),
+    );
+
+    const prnOrderId = createPrnOrderResponse.body.medicationOrder.id;
+    expect(createPrnOrderResponse.body.medicationOrder.isPRN).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/medications/${prnOrderId}/prn-protocol`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        indication: 'Pain or visible discomfort',
+        whenToOffer: 'Offer when the resident reports pain after movement.',
+        doseInstructions:
+          'Give 10ml by mouth as required, following the current MAR.',
+        minimumIntervalMinutes: 240,
+        maxDosePer24Hours: 4,
+        expectedEffect: 'Pain should ease within 45 minutes.',
+        monitoringRequired: 'Re-check comfort after 30 minutes.',
+        whenToEscalate: 'Escalate if pain does not improve.',
+      })
+      .expect(201);
+
+    const emarResponse = typedResponse<ResidentEmarResponse>(
+      await request(app.getHttpServer())
+        .get(`/residents/${seededResidents[1].id}/emar`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(200),
+    );
+
+    expect(emarResponse.body.prnMedications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: prnOrderId,
+          medicationName: 'Paracetamol',
+          isPRN: true,
+          schedules: [],
+          prnProtocol: expect.objectContaining({
+            minimumIntervalMinutes: 240,
+          }),
+        }),
+      ]),
+    );
+
+    await acknowledgeCurrentHandover(nurseToken);
+    await request(app.getHttpServer())
+      .post(`/shifts/${activeShift.id}/generate-medication-round`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .expect(201);
+
+    const roundResponse = typedResponse<MedicationRoundResponse>(
+      await request(app.getHttpServer())
+        .get(`/shifts/${activeShift.id}/medication-round`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(200),
+    );
+
+    const roundMedicationOrderIds = roundResponse.body.groupedRounds.flatMap(
+      (group) => group.items.map((item) => item.medicationOrderId),
+    );
+    expect(roundMedicationOrderIds).not.toContain(prnOrderId);
+
+    const doseInstanceCount = await prisma.medicationDoseInstance.count({
+      where: {
+        medicationOrderId: prnOrderId,
+      },
+    });
+    expect(doseInstanceCount).toBe(0);
+  });
+
+  it('generates medication dose instances from shift-start and handover anchors with deterministic due windows and no duplicates', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+    const fixedShiftStart = new Date();
+    fixedShiftStart.setHours(8, 0, 0, 0);
+    const fixedShiftEnd = new Date(
+      fixedShiftStart.getTime() + 8 * 60 * 60 * 1000,
+    );
+
+    activeShift = await prisma.shift.update({
+      where: {
+        id: activeShift.id,
+      },
+      data: {
+        startsAt: fixedShiftStart,
+        endsAt: fixedShiftEnd,
+      },
+    });
+
+    const shiftAnchoredOrder = await seedMedicationOrder({
+      residentId: seededResidents[0].id,
+      medicationName: 'Amlodipine',
+    });
+    const shiftAnchoredSchedule = await seedMedicationSchedule({
+      medicationOrderId: shiftAnchoredOrder.id,
+      roundLabel: 'MORNING',
+      anchorType: 'SHIFT_START',
+      windowStartOffsetMinutes: 0,
+      windowEndOffsetMinutes: 60,
+    });
+
+    const handoverAnchoredOrder = await seedMedicationOrder({
+      residentId: seededResidents[1].id,
+      medicationName: 'Donepezil',
+    });
+    const handoverAnchoredSchedule = await seedMedicationSchedule({
+      medicationOrderId: handoverAnchoredOrder.id,
+      roundLabel: 'MORNING',
+      anchorType: 'HANDOVER_ACKNOWLEDGED',
+      windowStartOffsetMinutes: 0,
+      windowEndOffsetMinutes: 60,
+    });
+
+    const initialGenerateResponse =
+      typedResponse<MedicationRoundGenerateResponse>(
+        await request(app.getHttpServer())
+          .post(`/shifts/${activeShift.id}/generate-medication-round`)
+          .set('Authorization', `Bearer ${nurseToken}`)
+          .expect(201),
+      );
+
+    expect(initialGenerateResponse.body.generatedCount).toBe(1);
+
+    const firstDoseInstance =
+      await prisma.medicationDoseInstance.findUniqueOrThrow({
+        where: {
+          shiftId_scheduleId: {
+            shiftId: activeShift.id,
+            scheduleId: shiftAnchoredSchedule.id,
+          },
+        },
+      });
+    expect(firstDoseInstance.dueWindowStart.toISOString()).toBe(
+      fixedShiftStart.toISOString(),
+    );
+    expect(firstDoseInstance.dueWindowEnd.toISOString()).toBe(
+      new Date(fixedShiftStart.getTime() + 60 * 60 * 1000).toISOString(),
+    );
+
+    const shiftHandover = await prisma.handover.findFirstOrThrow({
+      where: {
+        shiftId: activeShift.id,
+      },
+    });
+    const acknowledgedAt = new Date(fixedShiftStart.getTime() + 3 * 60 * 1000);
+    await prisma.handoverAcknowledgement.create({
+      data: {
+        handoverId: shiftHandover.id,
+        acknowledgedById: nurseUserId,
+        acknowledgedAt,
+      },
+    });
+
+    const secondGenerateResponse =
+      typedResponse<MedicationRoundGenerateResponse>(
+        await request(app.getHttpServer())
+          .post(`/shifts/${activeShift.id}/generate-medication-round`)
+          .set('Authorization', `Bearer ${nurseToken}`)
+          .expect(201),
+      );
+    expect(secondGenerateResponse.body.generatedCount).toBe(1);
+
+    const handoverDoseInstance =
+      await prisma.medicationDoseInstance.findUniqueOrThrow({
+        where: {
+          shiftId_scheduleId: {
+            shiftId: activeShift.id,
+            scheduleId: handoverAnchoredSchedule.id,
+          },
+        },
+      });
+    expect(handoverDoseInstance.dueWindowStart.toISOString()).toBe(
+      acknowledgedAt.toISOString(),
+    );
+    expect(handoverDoseInstance.dueWindowEnd.toISOString()).toBe(
+      new Date(acknowledgedAt.getTime() + 60 * 60 * 1000).toISOString(),
+    );
+
+    const thirdGenerateResponse =
+      typedResponse<MedicationRoundGenerateResponse>(
+        await request(app.getHttpServer())
+          .post(`/shifts/${activeShift.id}/generate-medication-round`)
+          .set('Authorization', `Bearer ${nurseToken}`)
+          .expect(201),
+      );
+    expect(thirdGenerateResponse.body.generatedCount).toBe(0);
+  });
+
+  it('blocks medication round access and medication actions before handover acknowledgement, then unlocks the round after acknowledgement', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+    const order = await seedMedicationOrder({
+      residentId: seededResidents[2].id,
+      medicationName: 'Metformin',
+    });
+    await seedMedicationSchedule({
+      medicationOrderId: order.id,
+      roundLabel: 'MORNING',
+      anchorType: 'SHIFT_START',
+      windowStartOffsetMinutes: 0,
+      windowEndOffsetMinutes: 60,
+    });
+
+    const generateResponse = typedResponse<MedicationRoundGenerateResponse>(
+      await request(app.getHttpServer())
+        .post(`/shifts/${activeShift.id}/generate-medication-round`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(201),
+    );
+    const doseInstanceId = generateResponse.body.generatedDoseInstanceIds[0];
+
+    const roundBeforeAcknowledgement = typedResponse<{ message: string }>(
+      await request(app.getHttpServer())
+        .get(`/shifts/${activeShift.id}/medication-round`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(403),
+    );
+    expect(roundBeforeAcknowledgement.body.message).toBe(
+      'Medication actions are blocked until the current shift handover is acknowledged.',
+    );
+
+    const administerBeforeAcknowledgement = typedResponse<{ message: string }>(
+      await request(app.getHttpServer())
+        .post(`/medication-dose-instances/${doseInstanceId}/administer`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .send({
+          doseGiven: '1',
+          doseUnit: 'tablet',
+        })
+        .expect(403),
+    );
+    expect(administerBeforeAcknowledgement.body.message).toBe(
+      'Medication actions are blocked until the current shift handover is acknowledged.',
+    );
+
+    await acknowledgeCurrentHandover(nurseToken);
+
+    const roundAfterAcknowledgement = typedResponse<MedicationRoundResponse>(
+      await request(app.getHttpServer())
+        .get(`/shifts/${activeShift.id}/medication-round`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(200),
+    );
+
+    expect(roundAfterAcknowledgement.body.shift.handoverAcknowledged).toBe(
+      true,
+    );
+    expect(roundAfterAcknowledgement.body.groupedRounds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roundLabel: 'MORNING',
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              id: doseInstanceId,
+              medicationName: 'Metformin',
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('rejects invalid resident and shift ids on resident profile and medication routes with 400 responses', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+
+    const invalidResidentProfile = typedResponse<{
+      message: string | string[];
+    }>(
+      await request(app.getHttpServer())
+        .get('/residents/null')
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(400),
+    );
+    expect(String(invalidResidentProfile.body.message)).toMatch(/uuid/i);
+
+    const invalidResidentEmar = typedResponse<{ message: string | string[] }>(
+      await request(app.getHttpServer())
+        .get('/residents/null/emar')
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(400),
+    );
+    expect(String(invalidResidentEmar.body.message)).toMatch(/uuid/i);
+
+    const invalidMedicationRound = typedResponse<{
+      message: string | string[];
+    }>(
+      await request(app.getHttpServer())
+        .get('/shifts/null/medication-round')
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(400),
+    );
+    expect(String(invalidMedicationRound.body.message)).toMatch(/uuid/i);
+  });
+
+  it('records administered medication, creates resident timeline entries, and exposes medication audit history', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+    const managerToken = await login('manager@sercesync.local');
+    const order = await seedMedicationOrder({
+      residentId: seededResidents[3].id,
+      medicationName: 'Levothyroxine',
+    });
+    await seedMedicationSchedule({
+      medicationOrderId: order.id,
+      roundLabel: 'MORNING',
+      anchorType: 'SHIFT_START',
+      windowStartOffsetMinutes: 0,
+      windowEndOffsetMinutes: 60,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/shifts/${activeShift.id}/generate-medication-round`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .expect(201);
+    await acknowledgeCurrentHandover(nurseToken);
+
+    const generatedDoseInstance =
+      await prisma.medicationDoseInstance.findFirstOrThrow({
+        where: {
+          medicationOrderId: order.id,
+          shiftId: activeShift.id,
+        },
+      });
+
+    const administerResponse = typedResponse<MedicationOutcomeResponse>(
+      await request(app.getHttpServer())
+        .post(
+          `/medication-dose-instances/${generatedDoseInstance.id}/administer`,
+        )
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .send({
+          doseGiven: '1',
+          doseUnit: 'tablet',
+          notes: 'Administered with water and observed swallowing.',
+        })
+        .expect(201),
+    );
+
+    expect(administerResponse.body.doseInstance.status).toBe('ADMINISTERED');
+    expect(administerResponse.body.administrationEvent.eventType).toBe(
+      'ADMINISTERED',
+    );
+
+    const residentTimelineEntry =
+      await prisma.residentTimelineEntry.findFirstOrThrow({
+        where: {
+          residentId: seededResidents[3].id,
+          type: 'MEDICATION_NOTE',
+          title: {
+            contains: 'Levothyroxine',
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+    expect(residentTimelineEntry.details).toContain('Levothyroxine');
+    expect(residentTimelineEntry.details).toContain('administered');
+
+    const auditResponse = typedResponse<{
+      workflowNote: string;
+      auditEvents: Array<{
+        kind: string;
+        residentId: string | null;
+        medicationOrderId: string | null;
+        medicationName: string | null;
+      }>;
+    }>(
+      await request(app.getHttpServer())
+        .get('/manager/medication-audit')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200),
+    );
+
+    expect(auditResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'MEDICATION_DOSE_ADMINISTERED',
+          residentId: seededResidents[3].id,
+          medicationOrderId: order.id,
+          medicationName: 'Levothyroxine',
+        }),
+      ]),
+    );
+  });
+
+  it('requires a reason for refused, omitted, delayed, and not-available medication outcomes', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+    await acknowledgeCurrentHandover(nurseToken);
+
+    const cases = [
+      {
+        medicationName: 'Refused Case',
+        endpoint: 'refuse',
+      },
+      {
+        medicationName: 'Omitted Case',
+        endpoint: 'omit',
+      },
+      {
+        medicationName: 'Delayed Case',
+        endpoint: 'delay',
+      },
+      {
+        medicationName: 'Unavailable Case',
+        endpoint: 'not-available',
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      const order = await seedMedicationOrder({
+        residentId: seededResidents[4].id,
+        medicationName: entry.medicationName,
+      });
+      const schedule = await seedMedicationSchedule({
+        medicationOrderId: order.id,
+      });
+      const dueDose = await prisma.medicationDoseInstance.create({
+        data: {
+          residentId: seededResidents[4].id,
+          medicationOrderId: order.id,
+          scheduleId: schedule.id,
+          shiftId: activeShift.id,
+          dueWindowStart: new Date(Date.now() - 10 * 60 * 1000),
+          dueWindowEnd: new Date(Date.now() + 50 * 60 * 1000),
+          status: 'DUE',
+          generatedAt: new Date(),
+          requiresWitness: false,
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post(`/medication-dose-instances/${dueDose.id}/${entry.endpoint}`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .send({
+          notes: 'Reason omitted on purpose for validation coverage.',
+        })
+        .expect(400);
+    }
+  });
+
+  it('records PRN offered, administered, refused, and not-given events while keeping PRN medication off timed rounds', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const nurseToken = await login('nurse@sercesync.local');
+
+    const createPrnOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[5].id}/medications`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          medicationName: 'Lorazepam',
+          formulation: 'tablet',
+          strength: '0.5mg tablet',
+          doseAmount: '1',
+          doseUnit: 'tablet',
+          route: 'oral',
+          instructions:
+            'Offer for acute anxiety following the current PRN MAR.',
+          startDate: startOfToday().toISOString(),
+          isPRN: true,
+          sourceType: 'MANUAL_ENTRY',
+          changeReason: 'PRN support order for anxious episodes.',
+        })
+        .expect(201),
+    );
+    const prnOrderId = createPrnOrderResponse.body.medicationOrder.id;
+
+    await request(app.getHttpServer())
+      .post(`/medications/${prnOrderId}/prn-protocol`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        indication: 'Anxiety or visible agitation',
+        whenToOffer: 'Offer when the resident is anxious or distressed.',
+        doseInstructions: 'Give one tablet by mouth if required.',
+        minimumIntervalMinutes: 240,
+        maxDosePer24Hours: 3,
+        expectedEffect: 'Resident should become calmer within 30 minutes.',
+        monitoringRequired: 'Observe level of calmness and drowsiness.',
+        whenToEscalate: 'Escalate if agitation continues or worsens.',
+      })
+      .expect(201);
+
+    await acknowledgeCurrentHandover(nurseToken);
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[5].id}/prn-events`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({
+        medicationOrderId: prnOrderId,
+        eventType: 'PRN_OFFERED',
+        reason: 'Resident appeared anxious before lunch.',
+      })
+      .expect(201);
+
+    const prnAdministeredResponse = typedResponse<{
+      warning: string | null;
+      administrationEvent: {
+        eventType: string;
+      };
+    }>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[5].id}/prn-events`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .send({
+          medicationOrderId: prnOrderId,
+          eventType: 'PRN_ADMINISTERED',
+          doseGiven: '1',
+          doseUnit: 'tablet',
+          reason: 'Resident remained anxious after reassurance.',
+        })
+        .expect(201),
+    );
+    expect(prnAdministeredResponse.body.administrationEvent.eventType).toBe(
+      'PRN_ADMINISTERED',
+    );
+    expect(prnAdministeredResponse.body.warning).toContain(
+      'Check prescribed PRN instructions before administration.',
+    );
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[5].id}/prn-events`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({
+        medicationOrderId: prnOrderId,
+        eventType: 'PRN_REFUSED',
+        reason: 'Resident declined after explanation.',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[5].id}/prn-events`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({
+        medicationOrderId: prnOrderId,
+        eventType: 'PRN_NOT_GIVEN',
+        reason: 'Symptoms settled before the dose was needed.',
+      })
+      .expect(201);
+
+    const recordedPrnEvents =
+      await prisma.medicationAdministrationEvent.findMany({
+        where: {
+          residentId: seededResidents[5].id,
+          medicationOrderId: prnOrderId,
+        },
+        orderBy: {
+          recordedAt: 'asc',
+        },
+      });
+    expect(recordedPrnEvents.map((event) => event.eventType)).toEqual([
+      'PRN_OFFERED',
+      'PRN_ADMINISTERED',
+      'PRN_REFUSED',
+      'PRN_NOT_GIVEN',
+    ]);
+
+    const emarResponse = typedResponse<ResidentEmarResponse>(
+      await request(app.getHttpServer())
+        .get(`/residents/${seededResidents[5].id}/emar`)
+        .set('Authorization', `Bearer ${nurseToken}`)
+        .expect(200),
+    );
+    expect(emarResponse.body.prnMedications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: prnOrderId,
+          schedules: [],
+          prnProtocol: expect.objectContaining({
+            minimumIntervalMinutes: 240,
+          }),
+        }),
+      ]),
+    );
+
+    const prnDoseInstances = await prisma.medicationDoseInstance.count({
+      where: {
+        medicationOrderId: prnOrderId,
+      },
+    });
+    expect(prnDoseInstances).toBe(0);
+  });
+
+  it('marks overdue medication and surfaces it in manager medication exceptions, overdue views, dashboards, and audit logs', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const order = await seedMedicationOrder({
+      residentId: seededResidents[6].id,
+      medicationName: 'Bisoprolol',
+    });
+    const schedule = await seedMedicationSchedule({
+      medicationOrderId: order.id,
+      roundLabel: 'MIDDAY',
+      anchorType: 'SHIFT_START',
+      windowStartOffsetMinutes: 30,
+      windowEndOffsetMinutes: 60,
+    });
+
+    const doseInstance = await prisma.medicationDoseInstance.create({
+      data: {
+        residentId: seededResidents[6].id,
+        medicationOrderId: order.id,
+        scheduleId: schedule.id,
+        shiftId: activeShift.id,
+        dueWindowStart: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        dueWindowEnd: new Date(Date.now() - 60 * 60 * 1000),
+        status: 'DUE',
+        generatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        requiresWitness: false,
+      },
+    });
+
+    const exceptionsResponse =
+      typedResponse<ManagerMedicationExceptionsResponse>(
+        await request(app.getHttpServer())
+          .get('/manager/medication-exceptions')
+          .set('Authorization', `Bearer ${managerToken}`)
+          .expect(200),
+      );
+
+    expect(exceptionsResponse.body.exceptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          doseInstanceId: doseInstance.id,
+          residentId: seededResidents[6].id,
+          residentName: seededResidents[6].fullName,
+          medicationName: 'Bisoprolol',
+          status: 'OVERDUE',
+          residentEmarPath: `/residents/${seededResidents[6].id}/emar`,
+        }),
+      ]),
+    );
+
+    const overdueResponse = typedResponse<ManagerOverdueMedicationResponse>(
+      await request(app.getHttpServer())
+        .get('/manager/overdue-medication')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200),
+    );
+    expect(overdueResponse.body.overdueMedication).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          doseInstanceId: doseInstance.id,
+          residentName: seededResidents[6].fullName,
+          medicationName: 'Bisoprolol',
+          status: 'OVERDUE',
+        }),
+      ]),
+    );
+
+    const dashboardResponse = typedResponse<
+      ManagerDashboardResponse & {
+        medicationOverview: {
+          totals: {
+            overdue: number;
+          };
+          exceptions: Array<{
+            doseInstanceId: string;
+            status: string;
+          }>;
+        };
+      }
+    >(
+      await request(app.getHttpServer())
+        .get('/manager/dashboard')
+        .query({ shiftId: activeShift.id })
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200),
+    );
+    expect(dashboardResponse.body.medicationOverview.totals.overdue).toBe(1);
+    expect(dashboardResponse.body.medicationOverview.exceptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          doseInstanceId: doseInstance.id,
+          status: 'OVERDUE',
+        }),
+      ]),
+    );
+
+    const viewAuditEvent = await prisma.auditEvent.findFirst({
+      where: {
+        kind: 'MEDICATION_EXCEPTION_VIEWED',
+        userId: (
+          await prisma.user.findUniqueOrThrow({
+            where: {
+              email: 'manager@sercesync.local',
+            },
+          })
+        ).id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+    expect(viewAuditEvent).not.toBeNull();
+  });
+
+  it('enforces role-based access for medication order management and medication administration recording', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const nurseToken = await login('nurse@sercesync.local');
+    const carerToken = await login('carer@sercesync.local');
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[7].id}/medications`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({
+        medicationName: 'Ibuprofen',
+        formulation: 'tablet',
+        strength: '200mg tablet',
+        doseAmount: '1',
+        doseUnit: 'tablet',
+        route: 'oral',
+        instructions: 'Manager-only order creation should block this request.',
+        startDate: startOfToday().toISOString(),
+      })
+      .expect(403);
+
+    const createdOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${seededResidents[7].id}/medications`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          medicationName: 'Ibuprofen',
+          formulation: 'tablet',
+          strength: '200mg tablet',
+          doseAmount: '1',
+          doseUnit: 'tablet',
+          route: 'oral',
+          instructions: 'Give with food following the current MAR.',
+          startDate: startOfToday().toISOString(),
+          changeReason: 'Created for access-control coverage.',
+        })
+        .expect(201),
+    );
+
+    await request(app.getHttpServer())
+      .patch(`/medications/${createdOrderResponse.body.medicationOrder.id}`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({
+        instructions: 'Attempted nurse edit should fail.',
+        reason: 'Permission test.',
+      })
+      .expect(403);
+
+    const schedule = await seedMedicationSchedule({
+      medicationOrderId: createdOrderResponse.body.medicationOrder.id,
+    });
+    const dueDose = await prisma.medicationDoseInstance.create({
+      data: {
+        residentId: seededResidents[7].id,
+        medicationOrderId: createdOrderResponse.body.medicationOrder.id,
+        scheduleId: schedule.id,
+        shiftId: activeShift.id,
+        dueWindowStart: new Date(Date.now() - 10 * 60 * 1000),
+        dueWindowEnd: new Date(Date.now() + 50 * 60 * 1000),
+        status: 'DUE',
+        generatedAt: new Date(),
+        requiresWitness: false,
+      },
+    });
+
+    await acknowledgeCurrentHandover(nurseToken);
+
+    await request(app.getHttpServer())
+      .post(`/medication-dose-instances/${dueDose.id}/administer`)
+      .set('Authorization', `Bearer ${carerToken}`)
+      .send({
+        doseGiven: '1',
+        doseUnit: 'tablet',
+      })
+      .expect(403);
+  });
+
+  it('preserves resident floor filtering for nurse medication views and round access', async () => {
+    const managerToken = await login('manager@sercesync.local');
+    const nurseToken = await login('nurse@sercesync.local');
+
+    const createOrderResponse = typedResponse<MedicationOrderWriteResponse>(
+      await request(app.getHttpServer())
+        .post(`/residents/${outOfScopeResident.id}/medications`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({
+          medicationName: 'Warfarin',
+          formulation: 'tablet',
+          strength: '1mg tablet',
+          doseAmount: '1',
+          doseUnit: 'tablet',
+          route: 'oral',
+          instructions: 'Maple floor order used to verify floor filtering.',
+          startDate: startOfToday().toISOString(),
+          changeReason: 'Cross-floor filtering coverage.',
+        })
+        .expect(201),
+    );
+
+    await request(app.getHttpServer())
+      .post(
+        `/medications/${createOrderResponse.body.medicationOrder.id}/schedules`,
+      )
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        roundLabel: 'MORNING',
+        anchorType: 'SHIFT_START',
+        windowStartOffsetMinutes: 0,
+        windowEndOffsetMinutes: 60,
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get(`/residents/${outOfScopeResident.id}/emar`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get(`/shifts/${mapleActiveShift.id}/medication-round`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .expect(404);
   });
 
   it('rejects protected task access without a bearer token', () => {

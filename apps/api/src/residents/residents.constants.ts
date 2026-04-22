@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
 import type {
   IncidentStatus,
+  MealIntakeAmount,
+  MealType,
   PersonalCareSubtype,
   ResidentTimelineEntryType,
 } from '@prisma/client';
@@ -25,6 +27,21 @@ const personalCareSubtypeLabels: Record<PersonalCareSubtype, string> = {
   CONTINENCE: 'Continence',
   FOOT_CARE: 'Foot care',
   SKIN_CARE: 'Skin care',
+};
+
+const mealTypeLabels: Record<MealType, string> = {
+  BREAKFAST: 'Breakfast',
+  LUNCH: 'Lunch',
+  DINNER: 'Dinner',
+  SNACK: 'Snack',
+};
+
+const mealIntakeAmountLabels: Record<MealIntakeAmount, string> = {
+  NONE: 'None eaten',
+  QUARTER: 'Quarter eaten',
+  HALF: 'Half eaten',
+  MOST: 'Most eaten',
+  ALL: 'All eaten',
 };
 
 export const incidentCategoryLabels = {
@@ -73,6 +90,8 @@ export function buildEntryTitle(
   type: ResidentTimelineEntryType,
   title: string | undefined,
   personalCareSubtype?: PersonalCareSubtype,
+  mealType?: MealType,
+  mealIntakeAmount?: MealIntakeAmount,
 ) {
   const trimmedTitle = title?.trim();
   if (trimmedTitle) {
@@ -81,6 +100,10 @@ export function buildEntryTitle(
 
   if (type === 'PERSONAL_CARE' && personalCareSubtype) {
     return `Personal Care · ${personalCareSubtypeLabels[personalCareSubtype]}`;
+  }
+
+  if (type === 'NUTRITION_HYDRATION' && mealType && mealIntakeAmount) {
+    return `${mealTypeLabels[mealType]} intake · ${mealIntakeAmountLabels[mealIntakeAmount]}`;
   }
 
   return entryTypeLabels[type];

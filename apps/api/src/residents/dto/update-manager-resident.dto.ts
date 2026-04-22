@@ -40,8 +40,8 @@ export class UpdateManagerResidentDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(800)
-  careSummary?: string;
+  @MaxLength(1200)
+  aboutMe?: string;
 
   @IsOptional()
   @IsEnum(ResidentPriorityLevel)

@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import '../api/api_client.dart';
+import 'package:provider/provider.dart';
+
+import '../controllers/mobile_session_controller.dart';
 import '../models/handover.dart';
 import '../models/user.dart';
 import '../theme/app_theme.dart';
@@ -8,76 +12,36 @@ import '../widgets/screen_message_state.dart';
 import 'shift_workspace_screen.dart';
 
 class HandoverScreen extends StatefulWidget {
-  const HandoverScreen({
-    super.key,
-    required this.apiClient,
-    required this.accessToken,
-    required this.user,
-  });
-
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
-  final LoginUser user;
+  const HandoverScreen({super.key});
 
   @override
   State<HandoverScreen> createState() => _HandoverScreenState();
 }
 
 class _HandoverScreenState extends State<HandoverScreen> {
-  bool _isLoading = true;
-  String? _errorMessage;
-  HandoverSnapshot? _snapshot;
-
   @override
   void initState() {
     super.initState();
-    _fetchHandover();
-  }
-
-  Future<void> _fetchHandover() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final snapshot = await widget.apiClient.getCurrentHandover(
-        accessToken: widget.accessToken,
-      );
-      setState(() => _snapshot = snapshot);
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _acknowledge() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final snapshot = await widget.apiClient.acknowledgeCurrentHandover(
-        accessToken: widget.accessToken,
-      );
-      if (mounted) setState(() => _snapshot = snapshot);
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    unawaited(context.read<MobileSessionController>().loadCurrentHandover());
   }
 
   void _goToWorkspace() {
+    final sessionController = context.read<MobileSessionController>();
+    if (!sessionController.hasActiveSession ||
+        sessionController.apiClient == null ||
+        sessionController.accessToken == null ||
+        sessionController.user == null ||
+        sessionController.handoverSnapshot == null) {
+      return;
+    }
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => ShiftWorkspaceScreen(
-          apiClient: widget.apiClient,
-          accessToken: widget.accessToken,
-          user: widget.user,
-          snapshot: _snapshot!,
+          apiClient: sessionController.apiClient!,
+          accessToken: sessionController.accessToken!,
+          user: sessionController.user!,
+          snapshot: sessionController.handoverSnapshot!,
         ),
       ),
     );
@@ -85,6 +49,8 @@ class _HandoverScreenState extends State<HandoverScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionController = context.watch<MobileSessionController>();
+
     return Container(
       decoration: AppTheme.atmosphericBackground,
       child: Scaffold(
@@ -94,38 +60,60 @@ class _HandoverScreenState extends State<HandoverScreen> {
           actions: [
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: _isLoading ? null : _fetchHandover,
+              onPressed: sessionController.isHandoverLoading
+                  ? null
+                  : () => unawaited(
+                      context.read<MobileSessionController>().loadCurrentHandover(
+                        forceRefresh: true,
+                      ),
+                    ),
             ),
           ],
         ),
         body: SafeArea(
-          child: _isLoading && _snapshot == null
+          child: sessionController.isHandoverLoading &&
+                  sessionController.handoverSnapshot == null
               ? const Center(
                   child: CircularProgressIndicator(color: AppTheme.primaryBlue),
                 )
-              : _buildContent(),
+              : _buildContent(
+                  isLoading: sessionController.isHandoverLoading,
+                  errorMessage: sessionController.handoverErrorMessage,
+                  snapshot: sessionController.handoverSnapshot,
+                  user: sessionController.user,
+                ),
         ),
       ),
     );
   }
 
-  Widget _buildContent() {
-    if (_errorMessage != null && _snapshot == null) {
+  Widget _buildContent({
+    required bool isLoading,
+    required String? errorMessage,
+    required HandoverSnapshot? snapshot,
+    required LoginUser? user,
+  }) {
+    if (errorMessage != null && snapshot == null) {
       return ScreenMessageState(
         imageAssetPath: 'assets/images/NoConnection.png',
         imageHeight: 200,
         title: 'Something went wrong',
-        message: _errorMessage!,
+        message: errorMessage,
         messageStyle: Theme.of(
           context,
         ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
         actionLabel: 'Try Again',
-        onAction: _fetchHandover,
+        onAction: () => context.read<MobileSessionController>().loadCurrentHandover(
+          forceRefresh: true,
+        ),
       );
     }
 
-    final snap = _snapshot!;
-    final isAcknowledged = snap.acknowledged;
+    if (snapshot == null || user == null) {
+      return const SizedBox.shrink();
+    }
+
+    final isAcknowledged = snapshot.acknowledged;
 
     if (isAcknowledged) {
       return Center(
@@ -203,7 +191,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
               ),
               const SizedBox(height: 32),
               Text(
-                '${widget.user.displayName.split(' ').first},',
+                '${user.displayName.split(' ').first},',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   letterSpacing: -1,
                   fontSize: 36,
@@ -220,7 +208,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
-
               Container(
                 decoration: BoxDecoration(
                   color: AppTheme.surfaceCard,
@@ -256,8 +243,10 @@ class _HandoverScreenState extends State<HandoverScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  snap.shift.name,
-                                  style: Theme.of(context).textTheme.titleLarge
+                                  snapshot.shift.name,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge
                                       ?.copyWith(
                                         color: AppTheme.primaryBlueDark,
                                       ),
@@ -265,11 +254,13 @@ class _HandoverScreenState extends State<HandoverScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   formatHourMinuteRange(
-                                    snap.shift.startsAt,
-                                    snap.shift.endsAt,
+                                    snapshot.shift.startsAt,
+                                    snapshot.shift.endsAt,
                                     separator: ' — ',
                                   ),
-                                  style: Theme.of(context).textTheme.bodyMedium
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
                                       ?.copyWith(
                                         color: AppTheme.textPrimary,
                                         fontWeight: FontWeight.w600,
@@ -281,7 +272,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
                         ],
                       ),
                     ),
-
                     Container(
                       padding: const EdgeInsets.all(28),
                       child: Column(
@@ -297,7 +287,9 @@ class _HandoverScreenState extends State<HandoverScreen> {
                               const SizedBox(width: 8),
                               Text(
                                 'SHIFT NOTES',
-                                style: Theme.of(context).textTheme.labelLarge
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelLarge
                                     ?.copyWith(
                                       color: AppTheme.textSecondary,
                                       letterSpacing: 1.2,
@@ -308,8 +300,10 @@ class _HandoverScreenState extends State<HandoverScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            snap.handover.summary,
-                            style: Theme.of(context).textTheme.bodyLarge
+                            snapshot.handover.summary,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
                                 ?.copyWith(
                                   height: 1.6,
                                   color: AppTheme.textPrimary,
@@ -321,8 +315,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                   ],
                 ),
               ),
-
-              if (_errorMessage != null) ...[
+              if (errorMessage != null) ...[
                 const SizedBox(height: 24),
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -331,7 +324,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(
-                    _errorMessage!,
+                    errorMessage,
                     style: const TextStyle(
                       color: AppTheme.errorRed,
                       fontWeight: FontWeight.w600,
@@ -343,7 +336,6 @@ class _HandoverScreenState extends State<HandoverScreen> {
             ],
           ),
         ),
-
         Container(
           padding: const EdgeInsets.fromLTRB(28, 20, 28, 36),
           decoration: BoxDecoration(
@@ -369,8 +361,12 @@ class _HandoverScreenState extends State<HandoverScreen> {
               ],
             ),
             child: FilledButton(
-              onPressed: _isLoading ? null : _acknowledge,
-              child: _isLoading
+              onPressed: isLoading
+                  ? null
+                  : () => context
+                      .read<MobileSessionController>()
+                      .acknowledgeCurrentHandover(),
+              child: isLoading
                   ? const SizedBox(
                       height: 24,
                       width: 24,

@@ -4,7 +4,6 @@ import '../api/api_client.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
 import 'resident_detail_screen.dart';
-import '../widgets/resident_priority_badge.dart';
 import '../widgets/screen_message_state.dart';
 
 class ResidentsScreen extends StatefulWidget {
@@ -13,11 +12,13 @@ class ResidentsScreen extends StatefulWidget {
     required this.apiClient,
     required this.accessToken,
     required this.currentCarerName,
+    required this.currentUserRole,
   });
 
   final SerceSyncApiClient apiClient;
   final String accessToken;
   final String currentCarerName;
+  final AppUserRole currentUserRole;
 
   @override
   State<ResidentsScreen> createState() => ResidentsScreenState();
@@ -62,6 +63,7 @@ class ResidentsScreenState extends State<ResidentsScreen> {
           apiClient: widget.apiClient,
           accessToken: widget.accessToken,
           currentCarerName: widget.currentCarerName,
+          currentUserRole: widget.currentUserRole,
         ),
       ),
     );
@@ -101,7 +103,7 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                 )
               : _errorMessage != null && _residents.isEmpty
               ? ScreenMessageState(
-                  imageAssetPath: 'assets/images/Resident.png',
+                  imageAssetPath: 'assets/images/resident_profile_01.png',
                   title: 'Residents couldn\'t be loaded',
                   message: _errorMessage!,
                   actionLabel: 'Try Again',
@@ -109,7 +111,7 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                 )
               : _residents.isEmpty
               ? const ScreenMessageState(
-                  imageAssetPath: 'assets/images/Resident.png',
+                  imageAssetPath: 'assets/images/resident_profile_01.png',
                   title: 'No residents assigned',
                   message:
                       'Residents will appear here when the shift is active.',
@@ -216,13 +218,24 @@ class _ResidentListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tone = _residentCardToneFor(resident.effectivePriority);
+    final showPriorityHue =
+        resident.effectivePriority != ResidentPriorityLevel.green;
+    final visibleAlert = _residentListAlertText(resident.alerts);
+
     return Container(
+      key: ValueKey(
+        'resident-card-${resident.id}-${resident.effectivePriority.apiValue}',
+      ),
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceCard,
+        color: showPriorityHue ? tone.background : AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.borderLight),
-        boxShadow: AppTheme.premiumShadow,
+        border: Border.all(
+          color: showPriorityHue ? tone.border : AppTheme.borderLight,
+          width: showPriorityHue ? 1.5 : 1,
+        ),
+        boxShadow: showPriorityHue ? tone.shadow : AppTheme.premiumShadow,
       ),
       child: InkWell(
         onTap: onTap,
@@ -264,10 +277,6 @@ class _ResidentListCard extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        ResidentPriorityBadge(
-                          priority: resident.effectivePriority,
-                          source: resident.prioritySource,
-                        ),
                         if (resident.activeIncidentCount > 0)
                           _ResidentIncidentCountPill(
                             count: resident.activeIncidentCount,
@@ -284,7 +293,7 @@ class _ResidentListCard extends StatelessWidget {
                         height: 1.3,
                       ),
                     ),
-                    if (resident.alerts.isNotEmpty) ...[
+                    if (visibleAlert != null) ...[
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -297,7 +306,7 @@ class _ResidentListCard extends StatelessWidget {
                           border: Border.all(color: AppTheme.borderLight),
                         ),
                         child: Text(
-                          resident.alerts.first,
+                          visibleAlert,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
@@ -316,6 +325,84 @@ class _ResidentListCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+String? _residentListAlertText(List<String> alerts) {
+  for (final alert in alerts) {
+    final normalizedAlert = alert.trim().toLowerCase();
+    if (normalizedAlert == 'due this shift') {
+      continue;
+    }
+    return alert;
+  }
+  return null;
+}
+
+class _ResidentCardTone {
+  const _ResidentCardTone({
+    required this.background,
+    required this.border,
+    required this.shadow,
+  });
+
+  final Color background;
+  final Color border;
+  final List<BoxShadow> shadow;
+}
+
+_ResidentCardTone _residentCardToneFor(ResidentPriorityLevel priority) {
+  switch (priority) {
+    case ResidentPriorityLevel.red:
+      return _ResidentCardTone(
+        background: Color.alphaBlend(
+          AppTheme.errorRed.withAlpha(20),
+          AppTheme.surfaceCard,
+        ),
+        border: AppTheme.errorRed.withAlpha(110),
+        shadow: [
+          BoxShadow(
+            color: AppTheme.errorRed.withAlpha(20),
+            blurRadius: 26,
+            spreadRadius: 0,
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: AppTheme.errorRed.withAlpha(10),
+            blurRadius: 10,
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      );
+    case ResidentPriorityLevel.amber:
+      return _ResidentCardTone(
+        background: Color.alphaBlend(
+          AppTheme.warningYellow.withAlpha(20),
+          AppTheme.surfaceCard,
+        ),
+        border: AppTheme.warningYellow.withAlpha(130),
+        shadow: [
+          BoxShadow(
+            color: AppTheme.warningYellow.withAlpha(22),
+            blurRadius: 26,
+            spreadRadius: 0,
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: AppTheme.warningYellow.withAlpha(12),
+            blurRadius: 10,
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      );
+    case ResidentPriorityLevel.green:
+      return const _ResidentCardTone(
+        background: AppTheme.surfaceCard,
+        border: AppTheme.borderLight,
+        shadow: [],
+      );
   }
 }
 

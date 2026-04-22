@@ -1,0 +1,2 @@
+ALTER TABLE "residents"
+ADD COLUMN "aboutMe" TEXT NOT NULL DEFAULT '';

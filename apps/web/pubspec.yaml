@@ -36,6 +36,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
   web: ^1.1.1
+  sercesync_domain:
+    path: ../../packages/sercesync_domain
+  provider: ^6.1.5+1
 
 dev_dependencies:
   flutter_test:
@@ -60,8 +63,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/Nurse1.png
-    - assets/images/SerceSync Logo Icon.png
+    - assets/images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

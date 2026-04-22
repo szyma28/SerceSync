@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../models/handover.dart';
+import '../models/medication_models.dart';
 import '../models/task.dart';
 import '../models/user.dart';
 import '../models/workspace_models.dart';
@@ -164,6 +165,207 @@ class SerceSyncApiClient {
     return ResidentDetail.fromJson(_decodeJson(response));
   }
 
+  Future<ResidentEmarProfile> getResidentEmar({
+    required String accessToken,
+    required String residentId,
+  }) async {
+    final response = await http.get(
+      _uri('/residents/$residentId/emar'),
+      headers: {'Authorization': 'Bearer $accessToken'},
+    );
+
+    return ResidentEmarProfile.fromJson(_decodeJson(response));
+  }
+
+  Future<MedicationRoundSnapshot> getMedicationRound({
+    required String accessToken,
+    required String shiftId,
+  }) async {
+    final response = await http.get(
+      _uri('/shifts/$shiftId/medication-round'),
+      headers: {'Authorization': 'Bearer $accessToken'},
+    );
+
+    return MedicationRoundSnapshot.fromJson(_decodeJson(response));
+  }
+
+  Future<MedicationDoseActionResult> administerMedicationDose({
+    required String accessToken,
+    required String doseInstanceId,
+    String? doseGiven,
+    String? doseUnit,
+    String? notes,
+    String? witnessUserId,
+  }) {
+    return _postDoseOutcome(
+      accessToken: accessToken,
+      doseInstanceId: doseInstanceId,
+      actionPath: 'administer',
+      doseGiven: doseGiven,
+      doseUnit: doseUnit,
+      notes: notes,
+      witnessUserId: witnessUserId,
+    );
+  }
+
+  Future<MedicationDoseActionResult> refuseMedicationDose({
+    required String accessToken,
+    required String doseInstanceId,
+    required String reason,
+    String? notes,
+    String? witnessUserId,
+  }) {
+    return _postDoseOutcome(
+      accessToken: accessToken,
+      doseInstanceId: doseInstanceId,
+      actionPath: 'refuse',
+      reason: reason,
+      notes: notes,
+      witnessUserId: witnessUserId,
+    );
+  }
+
+  Future<MedicationDoseActionResult> omitMedicationDose({
+    required String accessToken,
+    required String doseInstanceId,
+    required String reason,
+    String? notes,
+    String? witnessUserId,
+  }) {
+    return _postDoseOutcome(
+      accessToken: accessToken,
+      doseInstanceId: doseInstanceId,
+      actionPath: 'omit',
+      reason: reason,
+      notes: notes,
+      witnessUserId: witnessUserId,
+    );
+  }
+
+  Future<MedicationDoseActionResult> delayMedicationDose({
+    required String accessToken,
+    required String doseInstanceId,
+    required String reason,
+    String? notes,
+    String? witnessUserId,
+  }) {
+    return _postDoseOutcome(
+      accessToken: accessToken,
+      doseInstanceId: doseInstanceId,
+      actionPath: 'delay',
+      reason: reason,
+      notes: notes,
+      witnessUserId: witnessUserId,
+    );
+  }
+
+  Future<MedicationDoseActionResult> markMedicationNotAvailable({
+    required String accessToken,
+    required String doseInstanceId,
+    required String reason,
+    String? notes,
+    String? witnessUserId,
+  }) {
+    return _postDoseOutcome(
+      accessToken: accessToken,
+      doseInstanceId: doseInstanceId,
+      actionPath: 'not-available',
+      reason: reason,
+      notes: notes,
+      witnessUserId: witnessUserId,
+    );
+  }
+
+  Future<MedicationDoseActionResult> holdMedicationDose({
+    required String accessToken,
+    required String doseInstanceId,
+    required String reason,
+    String? notes,
+    String? witnessUserId,
+  }) async {
+    final response = await http.patch(
+      _uri('/medication-dose-instances/$doseInstanceId/status'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'status': MedicationDoseStatus.held.apiValue,
+        'reason': reason.trim(),
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+          'witnessUserId': witnessUserId.trim(),
+      }),
+    );
+
+    return MedicationDoseActionResult.fromJson(_decodeJson(response));
+  }
+
+  Future<PrnEventResult> recordPrnEvent({
+    required String accessToken,
+    required String residentId,
+    required String medicationOrderId,
+    required MedicationAdministrationEventType eventType,
+    required String reason,
+    String? doseGiven,
+    String? doseUnit,
+    String? notes,
+    String? witnessUserId,
+  }) async {
+    final response = await http.post(
+      _uri('/residents/$residentId/prn-events'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'medicationOrderId': medicationOrderId,
+        'eventType': eventType.apiValue,
+        'reason': reason,
+        if (doseGiven != null && doseGiven.trim().isNotEmpty)
+          'doseGiven': doseGiven.trim(),
+        if (doseUnit != null && doseUnit.trim().isNotEmpty)
+          'doseUnit': doseUnit.trim(),
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+          'witnessUserId': witnessUserId.trim(),
+      }),
+    );
+
+    return PrnEventResult.fromJson(_decodeJson(response));
+  }
+
+  Future<MedicationDoseActionResult> _postDoseOutcome({
+    required String accessToken,
+    required String doseInstanceId,
+    required String actionPath,
+    String? reason,
+    String? doseGiven,
+    String? doseUnit,
+    String? notes,
+    String? witnessUserId,
+  }) async {
+    final response = await http.post(
+      _uri('/medication-dose-instances/$doseInstanceId/$actionPath'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        if (doseGiven != null && doseGiven.trim().isNotEmpty)
+          'doseGiven': doseGiven.trim(),
+        if (doseUnit != null && doseUnit.trim().isNotEmpty)
+          'doseUnit': doseUnit.trim(),
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+          'witnessUserId': witnessUserId.trim(),
+      }),
+    );
+
+    return MedicationDoseActionResult.fromJson(_decodeJson(response));
+  }
+
   Future<ResidentTimelineEntry> createResidentTimelineEntry({
     required String accessToken,
     required String residentId,
@@ -180,6 +382,12 @@ class SerceSyncApiClient {
       if (draft.personalCareSubtype != null) {
         request.fields['personalCareSubtype'] =
             draft.personalCareSubtype!.apiValue;
+      }
+      if (draft.mealType != null) {
+        request.fields['mealType'] = draft.mealType!.apiValue;
+      }
+      if (draft.mealIntakeAmount != null) {
+        request.fields['mealIntakeAmount'] = draft.mealIntakeAmount!.apiValue;
       }
       request.files.add(
         http.MultipartFile.fromBytes(

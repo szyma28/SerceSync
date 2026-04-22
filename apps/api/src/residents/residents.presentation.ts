@@ -2,26 +2,34 @@ import type {
   IncidentMedia,
   IncidentSeverity,
   IncidentStatus,
+  MealIntakeAmount,
+  MealType,
   PersonalCareSubtype,
   ResidentPriorityLevel,
   ResidentTimelineEntryType,
+  TaskClinicalPriority,
+  TaskFocus,
   ResidentTimelineMedia,
   TaskStatus,
 } from '@prisma/client';
 import { buildResidentPriorityState } from './resident-priority';
 import { incidentCategoryLabels } from './residents.constants';
+import type { MedicationTaskCompatibleSummary } from '../medications/medication-operational-summary.types';
+import { buildMedicationTaskSummary } from '../tasks/task-medication-summary';
 
 type ResidentTaskSummaryInput = {
   id: string;
   title: string;
   description: string | null;
+  focus: TaskFocus;
+  clinicalPriority: TaskClinicalPriority;
   status: TaskStatus;
   dueAt: Date | null;
 };
 
 type ResidentTaskAlertInput = Pick<
   ResidentTaskSummaryInput,
-  'title' | 'status' | 'dueAt'
+  'title' | 'focus' | 'clinicalPriority' | 'status' | 'dueAt'
 >;
 
 type ResidentPriorityIncidentInput = {
@@ -50,7 +58,7 @@ type ManagerResidentInput = {
   floorNumber: number;
   unitLabel: string;
   recognitionImageKey: string;
-  careSummary: string;
+  aboutMe: string;
   isActive: boolean;
   baselinePriority: ResidentPriorityLevel;
   incidents: ResidentPriorityIncidentInput[];
@@ -62,6 +70,8 @@ type TimelineEntryInput = {
   id: string;
   type: ResidentTimelineEntryType;
   personalCareSubtype: PersonalCareSubtype | null;
+  mealType: MealType | null;
+  mealIntakeAmount: MealIntakeAmount | null;
   title: string;
   details: string;
   createdAt: Date;
@@ -96,6 +106,7 @@ type IncidentInput = {
 
 type IncidentExceptionFeedInput = {
   id: string;
+  shiftId: string;
   title: string;
   details: string;
   status: IncidentStatus;
@@ -104,16 +115,21 @@ type IncidentExceptionFeedInput = {
   resident: {
     fullName: string;
     roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
   };
 };
 
 type TaskExceptionFeedInput = {
   id: string;
+  shiftId: string;
   title: string;
   description: string | null;
   resident: {
     fullName: string;
     roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
   } | null;
   dashboardStatus: TaskStatus;
   dueAt: Date | null;
@@ -121,6 +137,7 @@ type TaskExceptionFeedInput = {
 
 type TimelineActivityFeedInput = {
   id: string;
+  shiftId: string;
   type: ResidentTimelineEntryType;
   title: string;
   details: string;
@@ -131,16 +148,21 @@ type TimelineActivityFeedInput = {
   resident: {
     fullName: string;
     roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
   };
 };
 
 type TaskActivityFeedInput = {
   id: string;
+  shiftId: string;
   title: string;
   statusNote: string | null;
   resident: {
     fullName: string;
     roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
   } | null;
   updatedAt: Date;
   updatedBy: {
@@ -150,6 +172,7 @@ type TaskActivityFeedInput = {
 
 type IncidentActivityFeedInput = {
   id: string;
+  shiftId: string;
   title: string;
   details: string;
   severity: IncidentSeverity;
@@ -158,14 +181,37 @@ type IncidentActivityFeedInput = {
   resident: {
     fullName: string;
     roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
   };
 };
+
+function resolveManagerFeedLocation(
+  resident:
+    | {
+        roomLabel: string;
+        floorNumber: number;
+        unitLabel: string;
+      }
+    | null
+    | undefined,
+  shift?: {
+    floorNumber: number;
+    unitLabel: string;
+  } | null,
+) {
+  return {
+    roomLabel: resident?.roomLabel ?? '',
+    floorNumber: resident?.floorNumber ?? shift?.floorNumber ?? 0,
+    unitLabel: resident?.unitLabel ?? shift?.unitLabel ?? 'Unknown unit',
+  };
+}
 
 function clampNumber(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-function mapTaskStatusToAlert(status: TaskStatus) {
+function mapTaskStatusToAlert(status: TaskStatus): string | null {
   switch (status) {
     case 'OVERDUE':
       return 'Overdue follow-up';
@@ -177,7 +223,7 @@ function mapTaskStatusToAlert(status: TaskStatus) {
       return 'Completed today';
     case 'PENDING':
     default:
-      return 'Due this shift';
+      return null;
   }
 }
 
@@ -221,7 +267,25 @@ export function buildContextLine(
   tasks: ResidentTaskAlertInput[],
   careSummary: string,
   referenceTime = Date.now(),
+  medicationSummaryInput?: MedicationTaskCompatibleSummary,
 ) {
+  const medicationSummary =
+    medicationSummaryInput ??
+    buildMedicationTaskSummary(tasks, new Date(referenceTime));
+  if (medicationSummary.headline != null) {
+    if (medicationSummary.overdue > 0) {
+      return `${medicationSummary.headline} · Immediate nurse follow-up needed`;
+    }
+
+    if (medicationSummary.dueWithinHour > 0) {
+      return `${medicationSummary.headline} · Keep timing visible this shift`;
+    }
+
+    if (medicationSummary.highPriority > 0) {
+      return `${medicationSummary.headline} · Stay alert for schedule drift`;
+    }
+  }
+
   const openTask = tasks.find(
     (task) => task.status !== 'COMPLETED' && task.status !== 'DEFERRED',
   );
@@ -233,11 +297,20 @@ export function buildContextLine(
   return `${openTask.title} · ${formatDueState(openTask.dueAt, referenceTime)}`;
 }
 
-export function buildAlerts(tasks: ResidentTaskAlertInput[]) {
-  const alerts = tasks
-    .slice(0, 2)
-    .map((task) => mapTaskStatusToAlert(task.status));
-  return [...new Set(alerts)];
+export function buildAlerts(
+  tasks: ResidentTaskAlertInput[],
+  medicationSummaryInput?: MedicationTaskCompatibleSummary,
+) {
+  const medicationSummary =
+    medicationSummaryInput ?? buildMedicationTaskSummary(tasks);
+  const alerts = [
+    ...(medicationSummary.headline == null ? [] : [medicationSummary.headline]),
+    ...tasks
+      .slice(0, 2)
+      .map((task) => mapTaskStatusToAlert(task.status))
+      .filter((alert): alert is string => alert != null),
+  ];
+  return [...new Set(alerts)].slice(0, 2);
 }
 
 function mapTimelineMedia(media: ResidentTimelineMedia) {
@@ -266,6 +339,8 @@ export function mapTimelineEntry(entry: TimelineEntryInput) {
     id: entry.id,
     type: entry.type,
     personalCareSubtype: entry.personalCareSubtype,
+    mealType: entry.mealType,
+    mealIntakeAmount: entry.mealIntakeAmount,
     title: entry.title,
     details: entry.details,
     authorName: entry.createdBy?.displayName ?? 'System note',
@@ -304,6 +379,8 @@ export function mapResidentTask(
     id: task.id,
     title: task.title,
     description: task.description,
+    focus: task.focus,
+    clinicalPriority: task.clinicalPriority,
     status: task.status,
     dueAt: task.dueAt,
     residentId,
@@ -355,7 +432,7 @@ export function mapManagerResident(resident: ManagerResidentInput) {
     floorNumber: resident.floorNumber,
     unitLabel: resident.unitLabel,
     recognitionImageKey: resident.recognitionImageKey,
-    careSummary: resident.careSummary,
+    aboutMe: resident.aboutMe,
     isActive: resident.isActive,
     ...priorityState,
     createdAt: resident.createdAt,
@@ -417,12 +494,17 @@ export function buildManagerComplianceSeries({
 export function mapIncidentExceptionFeedItem(
   incident: IncidentExceptionFeedInput,
 ) {
+  const location = resolveManagerFeedLocation(incident.resident);
+
   return {
     kind: 'INCIDENT' as const,
     id: incident.id,
+    shiftId: incident.shiftId,
     title: incident.title,
     residentName: incident.resident.fullName,
-    roomLabel: incident.resident.roomLabel,
+    roomLabel: location.roomLabel,
+    floorNumber: location.floorNumber,
+    unitLabel: location.unitLabel,
     description: incident.details,
     status: incident.status,
     severity: incident.severity,
@@ -438,16 +520,21 @@ export function mapIncidentExceptionFeedItem(
 
 export function mapTaskExceptionFeedItem(
   task: TaskExceptionFeedInput,
-  activeShift: { unitLabel: string },
+  activeShift: { id: string; floorNumber: number; unitLabel: string },
   referenceTime = Date.now(),
 ) {
+  const location = resolveManagerFeedLocation(task.resident, activeShift);
+
   if (task.dashboardStatus === 'ESCALATED') {
     return {
       kind: 'TASK' as const,
       id: task.id,
+      shiftId: task.shiftId,
       title: task.title,
       residentName: task.resident?.fullName ?? 'Unit task',
-      roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+      roomLabel: location.roomLabel,
+      floorNumber: location.floorNumber,
+      unitLabel: location.unitLabel,
       description:
         task.description ??
         'This item has been escalated for manager attention.',
@@ -467,9 +554,12 @@ export function mapTaskExceptionFeedItem(
     return {
       kind: 'TASK' as const,
       id: task.id,
+      shiftId: task.shiftId,
       title: task.title,
       residentName: task.resident?.fullName ?? 'Unit task',
-      roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+      roomLabel: location.roomLabel,
+      floorNumber: location.floorNumber,
+      unitLabel: location.unitLabel,
       description:
         task.description ?? 'This task missed its expected care window.',
       status: task.dashboardStatus,
@@ -492,9 +582,12 @@ export function mapTaskExceptionFeedItem(
     return {
       kind: 'TASK' as const,
       id: task.id,
+      shiftId: task.shiftId,
       title: task.title,
       residentName: task.resident?.fullName ?? 'Unit task',
-      roomLabel: task.resident?.roomLabel ?? activeShift.unitLabel,
+      roomLabel: location.roomLabel,
+      floorNumber: location.floorNumber,
+      unitLabel: location.unitLabel,
       description:
         task.description ?? 'This task is due soon within the active shift.',
       status: task.dashboardStatus,
@@ -533,12 +626,17 @@ function buildTimelineActivityBadge(type: ResidentTimelineEntryType) {
 }
 
 export function mapTimelineActivityFeedItem(entry: TimelineActivityFeedInput) {
+  const location = resolveManagerFeedLocation(entry.resident);
+
   return {
     id: `note-${entry.id}`,
     kind: 'NOTE' as const,
+    shiftId: entry.shiftId,
     title: entry.title,
     residentName: entry.resident.fullName,
-    roomLabel: entry.resident.roomLabel,
+    roomLabel: location.roomLabel,
+    floorNumber: location.floorNumber,
+    unitLabel: location.unitLabel,
     description: entry.details,
     actorName: entry.createdBy?.displayName ?? 'System note',
     occurredAt: entry.createdAt,
@@ -570,14 +668,19 @@ export function mapTaskActivityFeedItem(
   task: TaskActivityFeedInput,
   badge: 'COMPLETED' | 'DEFERRED' | 'ESCALATED',
   tone: 'success' | 'warning',
-  unitLabel: string,
+  shift: { id: string; floorNumber: number; unitLabel: string },
 ) {
+  const location = resolveManagerFeedLocation(task.resident, shift);
+
   return {
     id: `task-${task.id}-${badge.toLowerCase()}`,
     kind: 'TASK' as const,
+    shiftId: task.shiftId,
     title: task.title,
     residentName: task.resident?.fullName ?? 'Unit task',
-    roomLabel: task.resident?.roomLabel ?? unitLabel,
+    roomLabel: location.roomLabel,
+    floorNumber: location.floorNumber,
+    unitLabel: location.unitLabel,
     description: buildTaskActivityDescription(badge, task.statusNote),
     actorName: task.updatedBy?.displayName ?? 'Unknown user',
     occurredAt: task.updatedAt,
@@ -589,12 +692,17 @@ export function mapTaskActivityFeedItem(
 export function mapIncidentCreatedActivityFeedItem(
   incident: IncidentActivityFeedInput,
 ) {
+  const location = resolveManagerFeedLocation(incident.resident);
+
   return {
     id: `incident-created-${incident.id}`,
     kind: 'INCIDENT' as const,
+    shiftId: incident.shiftId,
     title: incident.title,
     residentName: incident.resident.fullName,
-    roomLabel: incident.resident.roomLabel,
+    roomLabel: location.roomLabel,
+    floorNumber: location.floorNumber,
+    unitLabel: location.unitLabel,
     description: incident.details,
     actorName: incident.actorName ?? 'Unknown user',
     occurredAt: incident.occurredAt,
@@ -609,19 +717,26 @@ export function mapIncidentTransitionActivityFeedItem({
   actorName,
   occurredAt,
   action,
+  shiftId,
 }: {
   eventId: string;
   incident: IncidentActivityFeedInput;
   actorName: string | null;
   occurredAt: Date;
   action: 'ACKNOWLEDGED' | 'RESOLVED';
+  shiftId: string;
 }) {
+  const location = resolveManagerFeedLocation(incident.resident);
+
   return {
     id: `incident-${action.toLowerCase()}-${eventId}`,
     kind: 'INCIDENT' as const,
+    shiftId,
     title: incident.title,
     residentName: incident.resident.fullName,
-    roomLabel: incident.resident.roomLabel,
+    roomLabel: location.roomLabel,
+    floorNumber: location.floorNumber,
+    unitLabel: location.unitLabel,
     description:
       action === 'ACKNOWLEDGED'
         ? 'Incident acknowledged and stays visible for follow-up.'

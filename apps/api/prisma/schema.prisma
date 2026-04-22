@@ -8,7 +8,7 @@ datasource db {
 
 enum RoleKey {
   CARER
-  SENIOR_CARER
+  NURSE
   MANAGER
 }
 
@@ -27,6 +27,21 @@ enum TaskStatus {
   OVERDUE
 }
 
+enum TaskFocus {
+  GENERAL
+  HYDRATION
+  OBSERVATION
+  PERSONAL_CARE
+  MOBILITY
+  MEDICATION
+}
+
+enum TaskClinicalPriority {
+  ROUTINE
+  PRIORITY
+  TIME_CRITICAL
+}
+
 enum ResidentTimelineEntryType {
   CARE_GIVEN
   OBSERVATION
@@ -35,6 +50,21 @@ enum ResidentTimelineEntryType {
   MOBILITY_REPOSITIONING
   MEDICATION_NOTE
   ESCALATION
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum MealIntakeAmount {
+  NONE
+  QUARTER
+  HALF
+  MOST
+  ALL
 }
 
 enum ResidentPriorityLevel {
@@ -84,6 +114,106 @@ enum AuditEventKind {
   SHIFT_ENDED
   USER_LOGIN
   USER_LOGOUT
+  MEDICATION_CHART_CREATED
+  MEDICATION_ORDER_CREATED
+  MEDICATION_ORDER_UPDATED
+  MEDICATION_ORDER_DEACTIVATED
+  MEDICATION_SCHEDULE_CREATED
+  MEDICATION_SCHEDULE_UPDATED
+  MEDICATION_DOSE_INSTANCE_GENERATED
+  MEDICATION_DOSE_ADMINISTERED
+  MEDICATION_DOSE_REFUSED
+  MEDICATION_DOSE_OMITTED
+  MEDICATION_DOSE_DELAYED
+  MEDICATION_DOSE_NOT_AVAILABLE
+  MEDICATION_DOSE_HELD
+  MEDICATION_PRN_EVENT_RECORDED
+  MEDICATION_STOCK_TRANSACTION_RECORDED
+  MEDICATION_ALLERGY_RECORDED
+  MEDICATION_EXCEPTION_VIEWED
+  MEDICATION_RECONCILIATION_STARTED
+  MEDICATION_RECONCILIATION_COMPLETED
+  MEDICATION_DOWNTIME_PACK_EXPORTED
+}
+
+enum MedicationChartStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MedicationRoundLabel {
+  MORNING
+  MIDDAY
+  EVENING
+  BEDTIME
+  CUSTOM
+}
+
+enum MedicationScheduleAnchorType {
+  SHIFT_START
+  HANDOVER_ACKNOWLEDGED
+  FIXED_TIME
+}
+
+enum MedicationDoseStatus {
+  DUE
+  ADMINISTERED
+  REFUSED
+  OMITTED
+  DELAYED
+  NOT_AVAILABLE
+  HELD
+  CANCELLED
+  OVERDUE
+}
+
+enum MedicationAdministrationEventType {
+  ADMINISTERED
+  REFUSED
+  OMITTED
+  DELAYED
+  NOT_AVAILABLE
+  HELD
+  PRN_OFFERED
+  PRN_ADMINISTERED
+  PRN_REFUSED
+  PRN_NOT_GIVEN
+}
+
+enum MedicationOrderSourceType {
+  MANUAL_ENTRY
+  PHARMACY_SUPPLIED
+  IMPORTED
+}
+
+enum MedicationStockTransactionType {
+  RECEIVED
+  ADMINISTERED
+  DISPOSED
+  RETURNED
+  ADJUSTED
+}
+
+enum MedicationChangeType {
+  CREATED
+  UPDATED
+  DEACTIVATED
+  REACTIVATED
+  SCHEDULE_CHANGED
+  PRN_PROTOCOL_CHANGED
+}
+
+enum MedicationReconciliationStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum MedicationReconciliationTriggerType {
+  DOWNTIME
+  CARE_TRANSITION
+  ROUTINE_REVIEW
+  CONTROLLED_DRUG_CHECK
 }
 
 model Role {
@@ -124,21 +254,23 @@ model User {
 }
 
 model Shift {
-  id              String                  @id @default(uuid()) @db.Uuid
-  name            String
-  startsAt        DateTime
-  endsAt          DateTime
-  status          ShiftStatus             @default(PLANNED)
-  floorNumber     Int                     @default(1)
-  unitLabel       String                  @default("Willow Floor")
-  handover        Handover?
-  tasks           Task[]
-  assignedUsers   User[]                  @relation("AssignedShifts")
-  timelineEntries ResidentTimelineEntry[]
-  incidents       Incident[]
-  auditEvents     AuditEvent[]
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  id                             String                          @id @default(uuid()) @db.Uuid
+  name                           String
+  startsAt                       DateTime
+  endsAt                         DateTime
+  status                         ShiftStatus                     @default(PLANNED)
+  floorNumber                    Int                             @default(1)
+  unitLabel                      String                          @default("Willow Floor")
+  handover                       Handover?
+  tasks                          Task[]
+  assignedUsers                  User[]                          @relation("AssignedShifts")
+  timelineEntries                ResidentTimelineEntry[]
+  incidents                      Incident[]
+  medicationDoseInstances        MedicationDoseInstance[]
+  medicationAdministrationEvents MedicationAdministrationEvent[]
+  auditEvents                    AuditEvent[]
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
 
   @@index([status, startsAt])
   @@map("shifts")
@@ -173,22 +305,24 @@ model HandoverAcknowledgement {
 }
 
 model Task {
-  id              String       @id @default(uuid()) @db.Uuid
-  shiftId         String       @db.Uuid
-  shift           Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  residentId      String?      @db.Uuid
-  resident        Resident?    @relation(fields: [residentId], references: [id], onDelete: SetNull)
-  title           String
-  description     String?
-  status          TaskStatus   @default(PENDING)
-  dueAt           DateTime?
-  statusNote      String?
-  statusUpdatedAt DateTime?
-  assignedUserId  String?      @db.Uuid
-  assignedUser    User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  auditEvents     AuditEvent[]
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id               String               @id @default(uuid()) @db.Uuid
+  shiftId          String               @db.Uuid
+  shift            Shift                @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  residentId       String?              @db.Uuid
+  resident         Resident?            @relation(fields: [residentId], references: [id], onDelete: SetNull)
+  title            String
+  description      String?
+  focus            TaskFocus            @default(GENERAL)
+  clinicalPriority TaskClinicalPriority @default(ROUTINE)
+  status           TaskStatus           @default(PENDING)
+  dueAt            DateTime?
+  statusNote       String?
+  statusUpdatedAt  DateTime?
+  assignedUserId   String?              @db.Uuid
+  assignedUser     User?                @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  auditEvents      AuditEvent[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   @@index([shiftId, status])
   @@index([assignedUserId])
@@ -198,21 +332,32 @@ model Task {
 }
 
 model Resident {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  fullName            String
-  roomNumber          Int
-  roomLabel           String
-  floorNumber         Int
-  unitLabel           String
-  recognitionImageKey String
-  careSummary         String
-  isActive            Boolean                 @default(true)
-  baselinePriority    ResidentPriorityLevel   @default(GREEN)
-  tasks               Task[]
-  timelineEntries     ResidentTimelineEntry[]
-  incidents           Incident[]
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
+  id                             String                          @id @default(uuid()) @db.Uuid
+  fullName                       String
+  roomNumber                     Int
+  roomLabel                      String
+  floorNumber                    Int
+  unitLabel                      String
+  recognitionImageKey            String
+  careSummary                    String
+  aboutMe                        String                          @default("")
+  isActive                       Boolean                         @default(true)
+  baselinePriority               ResidentPriorityLevel           @default(GREEN)
+  tasks                          Task[]
+  timelineEntries                ResidentTimelineEntry[]
+  incidents                      Incident[]
+  medicationCharts               ResidentMedicationChart[]
+  medicationOrders               MedicationOrder[]
+  medicationDoseInstances        MedicationDoseInstance[]
+  medicationAdministrationEvents MedicationAdministrationEvent[]
+  prnProtocols                   PRNProtocol[]
+  medicationAllergyIntolerances  MedicationAllergyIntolerance[]
+  medicationStockRecords         MedicationStockRecord[]
+  medicationStockTransactions    MedicationStockTransaction[]
+  medicationChangeLogs           MedicationChangeLog[]
+  medicationReconciliations      MedicationReconciliation[]
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
 
   @@unique([floorNumber, roomNumber])
   @@index([floorNumber, isActive])
@@ -225,6 +370,8 @@ model ResidentTimelineEntry {
   resident            Resident                  @relation(fields: [residentId], references: [id], onDelete: Cascade)
   type                ResidentTimelineEntryType
   personalCareSubtype PersonalCareSubtype?
+  mealType            MealType?
+  mealIntakeAmount    MealIntakeAmount?
   title               String
   details             String
   createdById         String?                   @db.Uuid
@@ -307,20 +454,276 @@ model IncidentMedia {
 }
 
 model AuditEvent {
-  id        String         @id @default(uuid()) @db.Uuid
-  kind      AuditEventKind
-  userId    String?        @db.Uuid
-  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shiftId   String?        @db.Uuid
-  shift     Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  taskId    String?        @db.Uuid
-  task      Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  details   Json?
-  createdAt DateTime       @default(now())
+  id                       String         @id @default(uuid()) @db.Uuid
+  kind                     AuditEventKind
+  userId                   String?        @db.Uuid
+  user                     User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shiftId                  String?        @db.Uuid
+  shift                    Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  taskId                   String?        @db.Uuid
+  task                     Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  residentId               String?        @db.Uuid
+  medicationOrderId        String?        @db.Uuid
+  medicationDoseInstanceId String?        @db.Uuid
+  details                  Json?
+  createdAt                DateTime       @default(now())
 
   @@index([kind, createdAt])
   @@index([userId])
   @@index([shiftId])
   @@index([taskId])
+  @@index([residentId])
+  @@index([medicationOrderId])
+  @@index([medicationDoseInstanceId])
   @@map("audit_events")
+}
+
+model ResidentMedicationChart {
+  id               String                @id @default(uuid()) @db.Uuid
+  residentId       String                @db.Uuid
+  resident         Resident              @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  status           MedicationChartStatus @default(ACTIVE)
+  createdByUserId  String                @db.Uuid
+  reviewedByUserId String?               @db.Uuid
+  archivedAt       DateTime?
+  medicationOrders MedicationOrder[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([residentId, status])
+  @@map("resident_medication_charts")
+}
+
+model MedicationOrder {
+  id                   String                          @id @default(uuid()) @db.Uuid
+  residentId           String                          @db.Uuid
+  resident             Resident                        @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  chartId              String                          @db.Uuid
+  chart                ResidentMedicationChart         @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  medicationName       String
+  formulation          String?
+  strength             String?
+  doseAmount           String
+  doseUnit             String
+  route                String
+  instructions         String
+  startDate            DateTime                        @db.Date
+  endDate              DateTime?                       @db.Date
+  isActive             Boolean                         @default(true)
+  isControlledDrug     Boolean                         @default(false)
+  requiresWitness      Boolean                         @default(false)
+  isPRN                Boolean                         @default(false)
+  sourceType           MedicationOrderSourceType       @default(MANUAL_ENTRY)
+  createdByUserId      String                          @db.Uuid
+  updatedByUserId      String                          @db.Uuid
+  deactivatedAt        DateTime?
+  deactivationReason   String?
+  schedules            MedicationSchedule[]
+  doseInstances        MedicationDoseInstance[]
+  administrationEvents MedicationAdministrationEvent[]
+  prnProtocol          PRNProtocol?
+  stockRecord          MedicationStockRecord?
+  stockTransactions    MedicationStockTransaction[]
+  changeLogs           MedicationChangeLog[]
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+
+  @@index([residentId, isActive])
+  @@index([chartId])
+  @@map("medication_orders")
+}
+
+model MedicationSchedule {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  medicationOrderId        String                       @db.Uuid
+  medicationOrder          MedicationOrder              @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  roundLabel               MedicationRoundLabel
+  anchorType               MedicationScheduleAnchorType
+  windowStartOffsetMinutes Int?
+  windowEndOffsetMinutes   Int?
+  fixedTimeLocal           String?
+  daysOfWeek               String[]                     @default([])
+  active                   Boolean                      @default(true)
+  doseInstances            MedicationDoseInstance[]
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+
+  @@index([medicationOrderId, active])
+  @@map("medication_schedules")
+}
+
+model MedicationDoseInstance {
+  id                   String                          @id @default(uuid()) @db.Uuid
+  residentId           String                          @db.Uuid
+  resident             Resident                        @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  medicationOrderId    String                          @db.Uuid
+  medicationOrder      MedicationOrder                 @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  scheduleId           String                          @db.Uuid
+  schedule             MedicationSchedule              @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  shiftId              String                          @db.Uuid
+  shift                Shift                           @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  dueWindowStart       DateTime
+  dueWindowEnd         DateTime
+  status               MedicationDoseStatus            @default(DUE)
+  generatedAt          DateTime                        @default(now())
+  recordedByUserId     String?                         @db.Uuid
+  recordedAt           DateTime?
+  reason               String?
+  notes                String?
+  requiresWitness      Boolean                         @default(false)
+  witnessUserId        String?                         @db.Uuid
+  administrationEvents MedicationAdministrationEvent[]
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+
+  @@unique([shiftId, scheduleId])
+  @@index([residentId, status])
+  @@index([shiftId, status, dueWindowEnd])
+  @@index([medicationOrderId])
+  @@map("medication_dose_instances")
+}
+
+model MedicationAdministrationEvent {
+  id                String                            @id @default(uuid()) @db.Uuid
+  doseInstanceId    String?                           @db.Uuid
+  doseInstance      MedicationDoseInstance?           @relation(fields: [doseInstanceId], references: [id], onDelete: SetNull)
+  residentId        String                            @db.Uuid
+  resident          Resident                          @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  medicationOrderId String                            @db.Uuid
+  medicationOrder   MedicationOrder                   @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  shiftId           String                            @db.Uuid
+  shift             Shift                             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  eventType         MedicationAdministrationEventType
+  doseGiven         String?
+  doseUnit          String?
+  reason            String?
+  notes             String?
+  recordedByUserId  String                            @db.Uuid
+  recordedAt        DateTime
+  witnessUserId     String?                           @db.Uuid
+  createdAt         DateTime                          @default(now())
+
+  @@index([doseInstanceId])
+  @@index([residentId, recordedAt])
+  @@index([shiftId, recordedAt])
+  @@map("medication_administration_events")
+}
+
+model PRNProtocol {
+  id                     String          @id @default(uuid()) @db.Uuid
+  residentId             String          @db.Uuid
+  resident               Resident        @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  medicationOrderId      String          @unique @db.Uuid
+  medicationOrder        MedicationOrder @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  indication             String
+  whenToOffer            String
+  doseInstructions       String
+  minimumIntervalMinutes Int?
+  maxDosePer24Hours      Int?
+  expectedEffect         String?
+  monitoringRequired     String?
+  whenToEscalate         String?
+  active                 Boolean         @default(true)
+  createdByUserId        String          @db.Uuid
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  @@index([residentId, active])
+  @@map("prn_protocols")
+}
+
+model MedicationAllergyIntolerance {
+  id               String   @id @default(uuid()) @db.Uuid
+  residentId       String   @db.Uuid
+  resident         Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  substance        String
+  reaction         String?
+  severity         String?
+  recordedByUserId String   @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([residentId, createdAt])
+  @@map("medication_allergy_intolerances")
+}
+
+model MedicationStockRecord {
+  id                  String                       @id @default(uuid()) @db.Uuid
+  residentId          String                       @db.Uuid
+  resident            Resident                     @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  medicationOrderId   String                       @unique @db.Uuid
+  medicationOrder     MedicationOrder              @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  currentQuantity     String
+  quantityUnit        String
+  lastCheckedByUserId String?                      @db.Uuid
+  lastCheckedAt       DateTime?
+  notes               String?
+  transactions        MedicationStockTransaction[]
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+
+  @@index([residentId])
+  @@map("medication_stock_records")
+}
+
+model MedicationStockTransaction {
+  id                String                         @id @default(uuid()) @db.Uuid
+  stockRecordId     String                         @db.Uuid
+  stockRecord       MedicationStockRecord          @relation(fields: [stockRecordId], references: [id], onDelete: Cascade)
+  residentId        String                         @db.Uuid
+  resident          Resident                       @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  medicationOrderId String                         @db.Uuid
+  medicationOrder   MedicationOrder                @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  transactionType   MedicationStockTransactionType
+  quantity          String
+  quantityUnit      String
+  recordedByUserId  String                         @db.Uuid
+  witnessUserId     String?                        @db.Uuid
+  reason            String?
+  createdAt         DateTime                       @default(now())
+
+  @@index([stockRecordId, createdAt])
+  @@index([residentId, createdAt])
+  @@map("medication_stock_transactions")
+}
+
+model MedicationChangeLog {
+  id                String               @id @default(uuid()) @db.Uuid
+  medicationOrderId String               @db.Uuid
+  medicationOrder   MedicationOrder      @relation(fields: [medicationOrderId], references: [id], onDelete: Cascade)
+  residentId        String               @db.Uuid
+  resident          Resident             @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  changedByUserId   String               @db.Uuid
+  changeType        MedicationChangeType
+  previousValueJson Json?
+  newValueJson      Json?
+  reason            String
+  createdAt         DateTime             @default(now())
+
+  @@index([residentId, createdAt])
+  @@index([medicationOrderId, createdAt])
+  @@map("medication_change_logs")
+}
+
+model MedicationReconciliation {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  residentId                 String                              @db.Uuid
+  resident                   Resident                            @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  status                     MedicationReconciliationStatus      @default(PENDING)
+  triggerType                MedicationReconciliationTriggerType
+  downtimeStartedAt          DateTime?
+  downtimeEndedAt            DateTime?
+  paperRecordLocation        String?
+  discrepancySummary         String?
+  controlledDrugCheckSummary String?
+  notes                      String?
+  createdByUserId            String                              @db.Uuid
+  completedByUserId          String?                             @db.Uuid
+  completedAt                DateTime?
+  createdAt                  DateTime                            @default(now())
+  updatedAt                  DateTime                            @updatedAt
+
+  @@index([residentId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("medication_reconciliations")
 }

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:web/web.dart' as web;
 
-import 'manager_dashboard_live_updates.dart';
+import 'manager_dashboard_live_updates_api.dart';
 
 ManagerDashboardLiveUpdatesConnector createManagerDashboardLiveUpdatesConnector(
   String baseUrl,
@@ -26,7 +26,7 @@ class _WebManagerDashboardLiveUpdatesConnector
   @override
   Stream<ManagerDashboardLiveUpdate> connect({
     required String accessToken,
-    required String shiftId,
+    String? shiftId,
   }) {
     late final StreamController<ManagerDashboardLiveUpdate> controller;
     web.EventSource? eventSource;
@@ -34,7 +34,10 @@ class _WebManagerDashboardLiveUpdatesConnector
 
     controller = StreamController<ManagerDashboardLiveUpdate>(
       onListen: () {
-        final uri = _uri('/manager/dashboard/stream?shiftId=$shiftId');
+        final querySuffix = shiftId == null || shiftId.trim().isEmpty
+            ? ''
+            : '?shiftId=$shiftId';
+        final uri = _uri('/manager/dashboard/stream$querySuffix');
 
         eventSource = web.EventSource(
           uri.toString(),

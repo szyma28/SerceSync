@@ -1,18 +1,30 @@
-part of '../../manager_app.dart';
+export 'package:sercesync_domain/sercesync_domain.dart'
+    show
+        AppUserRole,
+        AppUserRoleX,
+        IncidentSeverity,
+        IncidentSeverityX,
+        ResidentPriorityLevel,
+        ResidentPriorityLevelX,
+        ResidentPrioritySource,
+        ResidentPrioritySourceX,
+        ShiftPeriod,
+        ShiftStatus,
+        ShiftStatusX,
+        UserProfile,
+        residentPhotoAssetPath;
 
-enum ManagerResidentPriorityLevel { green, amber, red }
+import 'package:sercesync_domain/sercesync_domain.dart';
 
-enum ManagerResidentPrioritySource { baseline, incidentOverride }
-
-enum ManagerUserRole { carer, seniorCarer, manager }
-
-enum ManagerShiftStatus { planned, active, completed, cancelled }
+typedef ManagerResidentPriorityLevel = ResidentPriorityLevel;
+typedef ManagerResidentPrioritySource = ResidentPrioritySource;
+typedef ManagerUserRole = AppUserRole;
+typedef ManagerShiftStatus = ShiftStatus;
+typedef ManagerIncidentSeverity = IncidentSeverity;
 
 enum ManagerExceptionKind { incident, task }
 
 enum ManagerActivityKind { note, task, incident }
-
-enum ManagerIncidentSeverity { amber, red }
 
 enum ManagerExceptionStatus {
   open,
@@ -28,53 +40,30 @@ enum ManagerExceptionStatus {
 DateTime _parseManagerDateTime(String value) => DateTime.parse(value).toLocal();
 
 ManagerResidentPriorityLevel _parseManagerResidentPriorityLevel(String? value) {
-  switch (value) {
-    case 'RED':
-      return ManagerResidentPriorityLevel.red;
-    case 'AMBER':
-      return ManagerResidentPriorityLevel.amber;
-    case 'GREEN':
-    default:
-      return ManagerResidentPriorityLevel.green;
-  }
+  return ResidentPriorityLevelX.fromApiValue(value ?? 'GREEN');
 }
 
 ManagerResidentPrioritySource _parseManagerResidentPrioritySource(
   String? value,
 ) {
-  switch (value) {
-    case 'INCIDENT_OVERRIDE':
-      return ManagerResidentPrioritySource.incidentOverride;
-    case 'BASELINE':
-    default:
-      return ManagerResidentPrioritySource.baseline;
-  }
+  return ResidentPrioritySourceX.fromApiValue(value ?? 'BASELINE');
 }
 
 ManagerUserRole _parseManagerUserRole(String? value) {
   switch (value) {
-    case 'SENIOR_CARER':
-      return ManagerUserRole.seniorCarer;
+    case 'CARER':
+      return ManagerUserRole.carer;
+    case 'NURSE':
+      return ManagerUserRole.nurse;
     case 'MANAGER':
       return ManagerUserRole.manager;
-    case 'CARER':
-    default:
-      return ManagerUserRole.carer;
   }
+
+  throw ArgumentError.value(value, 'value', 'Unknown user role');
 }
 
 ManagerShiftStatus _parseManagerShiftStatus(String? value) {
-  switch (value) {
-    case 'ACTIVE':
-      return ManagerShiftStatus.active;
-    case 'COMPLETED':
-      return ManagerShiftStatus.completed;
-    case 'CANCELLED':
-      return ManagerShiftStatus.cancelled;
-    case 'PLANNED':
-    default:
-      return ManagerShiftStatus.planned;
-  }
+  return ShiftStatusX.fromApiValue(value ?? 'PLANNED');
 }
 
 ManagerExceptionKind _parseManagerExceptionKind(String? value) {
@@ -102,9 +91,9 @@ ManagerActivityKind _parseManagerActivityKind(String? value) {
 ManagerIncidentSeverity? _parseManagerIncidentSeverity(String? value) {
   switch (value) {
     case 'RED':
-      return ManagerIncidentSeverity.red;
+      return IncidentSeverity.red;
     case 'AMBER':
-      return ManagerIncidentSeverity.amber;
+      return IncidentSeverity.amber;
     default:
       return null;
   }
@@ -136,7 +125,10 @@ abstract class _ManagerFeedItem {
   const _ManagerFeedItem({
     required this.id,
     required this.title,
+    required this.shiftId,
     required this.residentName,
+    required this.floorNumber,
+    required this.unitLabel,
     required this.roomLabel,
     required this.description,
     required this.badge,
@@ -145,69 +137,28 @@ abstract class _ManagerFeedItem {
 
   final String id;
   final String title;
+  final String shiftId;
   final String residentName;
+  final int? floorNumber;
+  final String unitLabel;
   final String roomLabel;
   final String description;
   final String badge;
   final String badgeTone;
-}
 
-extension ManagerResidentPriorityLevelPresentation
-    on ManagerResidentPriorityLevel {
-  String get apiValue => name.toUpperCase();
-
-  String get label => switch (this) {
-    ManagerResidentPriorityLevel.green => 'Green',
-    ManagerResidentPriorityLevel.amber => 'Amber',
-    ManagerResidentPriorityLevel.red => 'Red',
-  };
-
-  String get baselineLabel => '$label baseline';
-}
-
-extension ManagerResidentPrioritySourcePresentation
-    on ManagerResidentPrioritySource {
-  String get label => switch (this) {
-    ManagerResidentPrioritySource.baseline => 'Baseline',
-    ManagerResidentPrioritySource.incidentOverride => 'Incident override',
-  };
-}
-
-extension ManagerUserRolePresentation on ManagerUserRole {
-  String get apiValue => switch (this) {
-    ManagerUserRole.carer => 'CARER',
-    ManagerUserRole.seniorCarer => 'SENIOR_CARER',
-    ManagerUserRole.manager => 'MANAGER',
-  };
-
-  String get label => switch (this) {
-    ManagerUserRole.carer => 'Carer',
-    ManagerUserRole.seniorCarer => 'Senior carer',
-    ManagerUserRole.manager => 'Manager',
-  };
-}
-
-extension ManagerShiftStatusPresentation on ManagerShiftStatus {
-  String get apiValue => switch (this) {
-    ManagerShiftStatus.planned => 'PLANNED',
-    ManagerShiftStatus.active => 'ACTIVE',
-    ManagerShiftStatus.completed => 'COMPLETED',
-    ManagerShiftStatus.cancelled => 'CANCELLED',
-  };
-
-  String get label => switch (this) {
-    ManagerShiftStatus.planned => 'Planned',
-    ManagerShiftStatus.active => 'Active',
-    ManagerShiftStatus.completed => 'Completed',
-    ManagerShiftStatus.cancelled => 'Cancelled',
-  };
-}
-
-extension ManagerIncidentSeverityPresentation on ManagerIncidentSeverity {
-  String get label => switch (this) {
-    ManagerIncidentSeverity.amber => 'Amber',
-    ManagerIncidentSeverity.red => 'Red',
-  };
+  String get locationLabel {
+    final segments = <String>[];
+    if (unitLabel.trim().isNotEmpty) {
+      segments.add(unitLabel.trim());
+    }
+    if (floorNumber != null) {
+      segments.add('Floor $floorNumber');
+    }
+    if (roomLabel.trim().isNotEmpty) {
+      segments.add(roomLabel.trim());
+    }
+    return segments.join(' • ');
+  }
 }
 
 extension ManagerExceptionStatusPresentation on ManagerExceptionStatus {
@@ -223,12 +174,12 @@ extension ManagerExceptionStatusPresentation on ManagerExceptionStatus {
   };
 }
 
-class ManagerUser {
+class ManagerUser extends UserProfile<ManagerUserRole> {
   const ManagerUser({
-    required this.id,
-    required this.email,
-    required this.displayName,
-    required this.role,
+    required super.id,
+    required super.email,
+    required super.displayName,
+    required super.role,
   });
 
   factory ManagerUser.fromJson(Map<String, dynamic> json) {
@@ -239,11 +190,6 @@ class ManagerUser {
       role: _parseManagerUserRole(json['role'] as String?),
     );
   }
-
-  final String id;
-  final String email;
-  final String displayName;
-  final ManagerUserRole role;
 }
 
 class ManagerSession {
@@ -267,13 +213,25 @@ class ManagerDashboardSnapshot {
     required this.activityFeed,
     required this.exceptionFeed,
     required this.complianceSeries,
+    this.medicationOverview,
   });
 
   factory ManagerDashboardSnapshot.fromJson(Map<String, dynamic> json) {
+    final parsedActiveShifts =
+        (json['activeShifts'] as List<dynamic>? ?? const [])
+            .map(
+              (entry) =>
+                  ManagerShiftSummary.fromJson(entry as Map<String, dynamic>),
+            )
+            .toList(growable: false);
+    final parsedActiveShift = json['activeShift'] != null
+        ? ManagerShiftSummary.fromJson(
+            json['activeShift'] as Map<String, dynamic>,
+          )
+        : parsedActiveShifts.first;
+
     return ManagerDashboardSnapshot(
-      activeShift: ManagerShiftSummary.fromJson(
-        json['activeShift'] as Map<String, dynamic>,
-      ),
+      activeShift: parsedActiveShift,
       metrics: ManagerDashboardMetrics.fromJson(
         json['metrics'] as Map<String, dynamic>,
       ),
@@ -296,6 +254,11 @@ class ManagerDashboardSnapshot {
                 ManagerCompliancePoint.fromJson(entry as Map<String, dynamic>),
           )
           .toList(),
+      medicationOverview: json['medicationOverview'] == null
+          ? null
+          : ManagerMedicationOverview.fromJson(
+              json['medicationOverview'] as Map<String, dynamic>,
+            ),
     );
   }
 
@@ -304,17 +267,19 @@ class ManagerDashboardSnapshot {
   final List<ManagerActivityFeedItem> activityFeed;
   final List<ManagerExceptionFeedItem> exceptionFeed;
   final List<ManagerCompliancePoint> complianceSeries;
+  final ManagerMedicationOverview? medicationOverview;
 }
 
-class ManagerShiftSummary {
+class ManagerShiftSummary extends ShiftPeriod {
   const ManagerShiftSummary({
-    required this.id,
-    required this.name,
-    required this.status,
-    required this.unitLabel,
-    required this.floorNumber,
-    required this.startsAt,
-    required this.endsAt,
+    required super.id,
+    required super.name,
+    required super.status,
+    required super.unitLabel,
+    required super.floorNumber,
+    required super.startsAt,
+    required super.endsAt,
+    required this.assignedUsers,
   });
 
   factory ManagerShiftSummary.fromJson(Map<String, dynamic> json) {
@@ -326,16 +291,13 @@ class ManagerShiftSummary {
       floorNumber: json['floorNumber'] as int,
       startsAt: _parseManagerDateTime(json['startsAt'] as String),
       endsAt: _parseManagerDateTime(json['endsAt'] as String),
+      assignedUsers: (json['assignedUsers'] as List<dynamic>? ?? const [])
+          .map((entry) => ManagerUser.fromJson(entry as Map<String, dynamic>))
+          .toList(growable: false),
     );
   }
 
-  final String id;
-  final String name;
-  final ManagerShiftStatus status;
-  final String unitLabel;
-  final int floorNumber;
-  final DateTime startsAt;
-  final DateTime endsAt;
+  final List<ManagerUser> assignedUsers;
 }
 
 class ManagerDashboardMetrics {
@@ -369,7 +331,10 @@ class ManagerExceptionFeedItem extends _ManagerFeedItem {
     required super.id,
     required this.kind,
     required super.title,
+    required super.shiftId,
     required super.residentName,
+    required super.floorNumber,
+    required super.unitLabel,
     required super.roomLabel,
     required super.description,
     required this.status,
@@ -387,7 +352,10 @@ class ManagerExceptionFeedItem extends _ManagerFeedItem {
       id: json['id'] as String,
       kind: _parseManagerExceptionKind(json['kind'] as String?),
       title: json['title'] as String,
+      shiftId: json['shiftId'] as String? ?? '',
       residentName: json['residentName'] as String,
+      floorNumber: json['floorNumber'] as int?,
+      unitLabel: json['unitLabel'] as String? ?? '',
       roomLabel: json['roomLabel'] as String,
       description: json['description'] as String,
       status: _parseManagerExceptionStatus(json['status'] as String?),
@@ -420,7 +388,10 @@ class ManagerActivityFeedItem extends _ManagerFeedItem {
     required super.id,
     required this.kind,
     required super.title,
+    required super.shiftId,
     required super.residentName,
+    required super.floorNumber,
+    required super.unitLabel,
     required super.roomLabel,
     required super.description,
     required this.actorName,
@@ -434,7 +405,10 @@ class ManagerActivityFeedItem extends _ManagerFeedItem {
       id: json['id'] as String,
       kind: _parseManagerActivityKind(json['kind'] as String?),
       title: json['title'] as String,
+      shiftId: json['shiftId'] as String? ?? '',
       residentName: json['residentName'] as String,
+      floorNumber: json['floorNumber'] as int?,
+      unitLabel: json['unitLabel'] as String? ?? '',
       roomLabel: json['roomLabel'] as String,
       description: json['description'] as String,
       actorName: json['actorName'] as String? ?? 'Unknown user',
@@ -462,21 +436,21 @@ class ManagerCompliancePoint {
   final int value;
 }
 
-class ManagerResidentRecord {
+class ManagerResidentRecord extends ResidentIdentity {
   const ManagerResidentRecord({
-    required this.id,
-    required this.fullName,
+    required super.id,
+    required super.fullName,
     required this.roomNumber,
-    required this.roomLabel,
-    required this.floorNumber,
-    required this.unitLabel,
-    required this.recognitionImageKey,
-    required this.careSummary,
+    required super.roomLabel,
+    required super.floorNumber,
+    required super.unitLabel,
+    required super.recognitionImageKey,
+    required super.aboutMe,
     required this.isActive,
-    required this.baselinePriority,
-    required this.effectivePriority,
-    required this.prioritySource,
-    required this.activeIncidentCount,
+    required super.baselinePriority,
+    required super.effectivePriority,
+    required super.prioritySource,
+    required super.activeIncidentCount,
   });
 
   factory ManagerResidentRecord.fromJson(Map<String, dynamic> json) {
@@ -488,7 +462,7 @@ class ManagerResidentRecord {
       floorNumber: json['floorNumber'] as int,
       unitLabel: json['unitLabel'] as String,
       recognitionImageKey: json['recognitionImageKey'] as String,
-      careSummary: json['careSummary'] as String,
+      aboutMe: (json['aboutMe'] as String?) ?? '',
       isActive: json['isActive'] as bool,
       baselinePriority: _parseManagerResidentPriorityLevel(
         json['baselinePriority'] as String?,
@@ -503,19 +477,847 @@ class ManagerResidentRecord {
     );
   }
 
-  final String id;
-  final String fullName;
   final int roomNumber;
-  final String roomLabel;
-  final int floorNumber;
-  final String unitLabel;
-  final String recognitionImageKey;
-  final String careSummary;
   final bool isActive;
-  final ManagerResidentPriorityLevel baselinePriority;
-  final ManagerResidentPriorityLevel effectivePriority;
-  final ManagerResidentPrioritySource prioritySource;
-  final int activeIncidentCount;
+}
+
+class ManagerMedicationOverview {
+  const ManagerMedicationOverview({
+    required this.workflowNote,
+    required this.totals,
+    required this.exceptions,
+    required this.recentPrnEvents,
+    required this.recentChanges,
+  });
+
+  factory ManagerMedicationOverview.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationOverview(
+      workflowNote: json['workflowNote'] as String? ?? '',
+      totals: ManagerMedicationOverviewTotals.fromJson(
+        json['totals'] as Map<String, dynamic>? ?? const {},
+      ),
+      exceptions: (json['exceptions'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationException.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      recentPrnEvents: (json['recentPrnEvents'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationAdministrationRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      recentChanges: (json['recentChanges'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationChangeLogRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  final String workflowNote;
+  final ManagerMedicationOverviewTotals totals;
+  final List<ManagerMedicationException> exceptions;
+  final List<ManagerMedicationAdministrationRecord> recentPrnEvents;
+  final List<ManagerMedicationChangeLogRecord> recentChanges;
+}
+
+class ManagerMedicationOverviewTotals {
+  const ManagerMedicationOverviewTotals({
+    required this.overdue,
+    required this.refused,
+    required this.omitted,
+    required this.delayed,
+    required this.notAvailable,
+    required this.held,
+    required this.recentPrnAdministrations,
+  });
+
+  factory ManagerMedicationOverviewTotals.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationOverviewTotals(
+      overdue: json['overdue'] as int? ?? 0,
+      refused: json['refused'] as int? ?? 0,
+      omitted: json['omitted'] as int? ?? 0,
+      delayed: json['delayed'] as int? ?? 0,
+      notAvailable: json['notAvailable'] as int? ?? 0,
+      held: json['held'] as int? ?? 0,
+      recentPrnAdministrations: json['recentPrnAdministrations'] as int? ?? 0,
+    );
+  }
+
+  final int overdue;
+  final int refused;
+  final int omitted;
+  final int delayed;
+  final int notAvailable;
+  final int held;
+  final int recentPrnAdministrations;
+}
+
+class ManagerMedicationException {
+  const ManagerMedicationException({
+    required this.id,
+    required this.residentId,
+    required this.residentName,
+    required this.roomLabel,
+    required this.medicationOrderId,
+    required this.medicationName,
+    required this.strength,
+    required this.roundLabel,
+    required this.status,
+    required this.dueWindowStart,
+    required this.dueWindowEnd,
+    required this.recordedByUserId,
+    required this.recordedByUserName,
+    required this.recordedAt,
+    required this.reason,
+    required this.notes,
+    required this.residentEmarPath,
+    required this.doseInstanceId,
+  });
+
+  factory ManagerMedicationException.fromJson(Map<String, dynamic> json) {
+    final resolvedId =
+        (json['id'] as String?) ??
+        (json['doseInstanceId'] as String?) ??
+        (json['medicationOrderId'] as String?) ??
+        '';
+
+    return ManagerMedicationException(
+      id: resolvedId,
+      residentId: json['residentId'] as String,
+      residentName: json['residentName'] as String? ?? 'Resident',
+      roomLabel: json['roomLabel'] as String? ?? '',
+      medicationOrderId: json['medicationOrderId'] as String? ?? '',
+      medicationName: json['medicationName'] as String? ?? '',
+      strength: json['strength'] as String?,
+      roundLabel: json['roundLabel'] as String? ?? 'CUSTOM',
+      status: json['status'] as String? ?? 'DUE',
+      dueWindowStart: _parseManagerDateTime(json['dueWindowStart'] as String),
+      dueWindowEnd: _parseManagerDateTime(json['dueWindowEnd'] as String),
+      recordedByUserId: json['recordedByUserId'] as String?,
+      recordedByUserName: json['recordedByUserName'] as String?,
+      recordedAt: json['recordedAt'] == null
+          ? null
+          : _parseManagerDateTime(json['recordedAt'] as String),
+      reason: json['reason'] as String?,
+      notes: json['notes'] as String?,
+      residentEmarPath: json['residentEmarPath'] as String? ?? '',
+      doseInstanceId: json['doseInstanceId'] as String? ?? '',
+    );
+  }
+
+  final String id;
+  final String residentId;
+  final String residentName;
+  final String roomLabel;
+  final String medicationOrderId;
+  final String medicationName;
+  final String? strength;
+  final String roundLabel;
+  final String status;
+  final DateTime dueWindowStart;
+  final DateTime dueWindowEnd;
+  final String? recordedByUserId;
+  final String? recordedByUserName;
+  final DateTime? recordedAt;
+  final String? reason;
+  final String? notes;
+  final String residentEmarPath;
+  final String doseInstanceId;
+
+  String get medicationLabel => [
+    medicationName,
+    strength,
+  ].whereType<String>().where((part) => part.trim().isNotEmpty).join(' ');
+}
+
+class ManagerResidentEmarProfile {
+  const ManagerResidentEmarProfile({
+    required this.workflowNote,
+    required this.downtimeNotice,
+    required this.safetyBanner,
+    required this.chart,
+    required this.allergies,
+    required this.scheduledMedications,
+    required this.prnMedications,
+    required this.recentEvents,
+    required this.stockOverview,
+    required this.changeHistory,
+  });
+
+  factory ManagerResidentEmarProfile.fromJson(Map<String, dynamic> json) {
+    return ManagerResidentEmarProfile(
+      workflowNote: json['workflowNote'] as String? ?? '',
+      downtimeNotice: json['downtimeNotice'] as String? ?? '',
+      safetyBanner: json['safetyBanner'] as String? ?? '',
+      chart: json['chart'] == null
+          ? null
+          : ManagerMedicationChartSummary.fromJson(
+              json['chart'] as Map<String, dynamic>,
+            ),
+      allergies: (json['allergies'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationAllergyRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      scheduledMedications:
+          (json['scheduledMedications'] as List<dynamic>? ?? const [])
+              .map(
+                (entry) => ManagerMedicationOrderRecord.fromJson(
+                  entry as Map<String, dynamic>,
+                ),
+              )
+              .toList(growable: false),
+      prnMedications: (json['prnMedications'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationOrderRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      recentEvents: (json['recentEvents'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationAdministrationRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      stockOverview: (json['stockOverview'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationStockSummary.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      changeHistory: (json['changeHistory'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationChangeLogRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  final String workflowNote;
+  final String downtimeNotice;
+  final String safetyBanner;
+  final ManagerMedicationChartSummary? chart;
+  final List<ManagerMedicationAllergyRecord> allergies;
+  final List<ManagerMedicationOrderRecord> scheduledMedications;
+  final List<ManagerMedicationOrderRecord> prnMedications;
+  final List<ManagerMedicationAdministrationRecord> recentEvents;
+  final List<ManagerMedicationStockSummary> stockOverview;
+  final List<ManagerMedicationChangeLogRecord> changeHistory;
+}
+
+class ManagerMedicationChartSummary {
+  const ManagerMedicationChartSummary({
+    required this.id,
+    required this.status,
+    required this.createdByUserId,
+    required this.createdByUserName,
+    required this.reviewedByUserId,
+    required this.reviewedByUserName,
+    required this.archivedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ManagerMedicationChartSummary.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationChartSummary(
+      id: json['id'] as String,
+      status: json['status'] as String? ?? 'ACTIVE',
+      createdByUserId: json['createdByUserId'] as String?,
+      createdByUserName: json['createdByUserName'] as String?,
+      reviewedByUserId: json['reviewedByUserId'] as String?,
+      reviewedByUserName: json['reviewedByUserName'] as String?,
+      archivedAt: json['archivedAt'] == null
+          ? null
+          : _parseManagerDateTime(json['archivedAt'] as String),
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String status;
+  final String? createdByUserId;
+  final String? createdByUserName;
+  final String? reviewedByUserId;
+  final String? reviewedByUserName;
+  final DateTime? archivedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class ManagerMedicationAllergyRecord {
+  const ManagerMedicationAllergyRecord({
+    required this.id,
+    required this.substance,
+    required this.reaction,
+    required this.severity,
+    required this.recordedByUserId,
+    required this.recordedByUserName,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ManagerMedicationAllergyRecord.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationAllergyRecord(
+      id: json['id'] as String,
+      substance: json['substance'] as String? ?? '',
+      reaction: json['reaction'] as String?,
+      severity: json['severity'] as String?,
+      recordedByUserId: json['recordedByUserId'] as String?,
+      recordedByUserName: json['recordedByUserName'] as String?,
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String substance;
+  final String? reaction;
+  final String? severity;
+  final String? recordedByUserId;
+  final String? recordedByUserName;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class ManagerMedicationScheduleRecord {
+  const ManagerMedicationScheduleRecord({
+    required this.id,
+    required this.roundLabel,
+    required this.anchorType,
+    required this.windowStartOffsetMinutes,
+    required this.windowEndOffsetMinutes,
+    required this.fixedTimeLocal,
+    required this.daysOfWeek,
+    required this.active,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ManagerMedicationScheduleRecord.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationScheduleRecord(
+      id: json['id'] as String,
+      roundLabel: json['roundLabel'] as String? ?? 'CUSTOM',
+      anchorType: json['anchorType'] as String? ?? 'SHIFT_START',
+      windowStartOffsetMinutes: json['windowStartOffsetMinutes'] as int?,
+      windowEndOffsetMinutes: json['windowEndOffsetMinutes'] as int?,
+      fixedTimeLocal: json['fixedTimeLocal'] as String?,
+      daysOfWeek: (json['daysOfWeek'] as List<dynamic>? ?? const [])
+          .map((entry) => entry.toString())
+          .toList(growable: false),
+      active: json['active'] as bool? ?? true,
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String roundLabel;
+  final String anchorType;
+  final int? windowStartOffsetMinutes;
+  final int? windowEndOffsetMinutes;
+  final String? fixedTimeLocal;
+  final List<String> daysOfWeek;
+  final bool active;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class ManagerPrnProtocolRecord {
+  const ManagerPrnProtocolRecord({
+    required this.id,
+    required this.indication,
+    required this.whenToOffer,
+    required this.doseInstructions,
+    required this.minimumIntervalMinutes,
+    required this.maxDosePer24Hours,
+    required this.expectedEffect,
+    required this.monitoringRequired,
+    required this.whenToEscalate,
+    required this.active,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ManagerPrnProtocolRecord.fromJson(Map<String, dynamic> json) {
+    return ManagerPrnProtocolRecord(
+      id: json['id'] as String,
+      indication: json['indication'] as String? ?? '',
+      whenToOffer: json['whenToOffer'] as String? ?? '',
+      doseInstructions: json['doseInstructions'] as String? ?? '',
+      minimumIntervalMinutes: json['minimumIntervalMinutes'] as int?,
+      maxDosePer24Hours: json['maxDosePer24Hours'] as int?,
+      expectedEffect: json['expectedEffect'] as String?,
+      monitoringRequired: json['monitoringRequired'] as String?,
+      whenToEscalate: json['whenToEscalate'] as String?,
+      active: json['active'] as bool? ?? true,
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String indication;
+  final String whenToOffer;
+  final String doseInstructions;
+  final int? minimumIntervalMinutes;
+  final int? maxDosePer24Hours;
+  final String? expectedEffect;
+  final String? monitoringRequired;
+  final String? whenToEscalate;
+  final bool active;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class ManagerMedicationStockSummary {
+  const ManagerMedicationStockSummary({
+    required this.id,
+    required this.currentQuantity,
+    required this.quantityUnit,
+    required this.lastCheckedByUserId,
+    required this.lastCheckedByUserName,
+    required this.lastCheckedAt,
+    required this.notes,
+    required this.updatedAt,
+  });
+
+  factory ManagerMedicationStockSummary.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationStockSummary(
+      id: json['id'] as String,
+      currentQuantity: json['currentQuantity'] as String? ?? '',
+      quantityUnit: json['quantityUnit'] as String? ?? '',
+      lastCheckedByUserId: json['lastCheckedByUserId'] as String?,
+      lastCheckedByUserName: json['lastCheckedByUserName'] as String?,
+      lastCheckedAt: json['lastCheckedAt'] == null
+          ? null
+          : _parseManagerDateTime(json['lastCheckedAt'] as String),
+      notes: json['notes'] as String?,
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+    );
+  }
+
+  final String id;
+  final String currentQuantity;
+  final String quantityUnit;
+  final String? lastCheckedByUserId;
+  final String? lastCheckedByUserName;
+  final DateTime? lastCheckedAt;
+  final String? notes;
+  final DateTime updatedAt;
+}
+
+class ManagerMedicationOrderRecord {
+  const ManagerMedicationOrderRecord({
+    required this.id,
+    required this.medicationName,
+    required this.formulation,
+    required this.strength,
+    required this.doseAmount,
+    required this.doseUnit,
+    required this.route,
+    required this.instructions,
+    required this.startDate,
+    required this.endDate,
+    required this.isActive,
+    required this.isControlledDrug,
+    required this.requiresWitness,
+    required this.isPrn,
+    required this.sourceType,
+    required this.createdByUserId,
+    required this.createdByUserName,
+    required this.updatedByUserId,
+    required this.updatedByUserName,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.deactivatedAt,
+    required this.deactivationReason,
+    required this.schedules,
+    required this.prnProtocol,
+    required this.stock,
+  });
+
+  factory ManagerMedicationOrderRecord.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationOrderRecord(
+      id: json['id'] as String,
+      medicationName: json['medicationName'] as String? ?? '',
+      formulation: json['formulation'] as String?,
+      strength: json['strength'] as String?,
+      doseAmount: json['doseAmount'] as String? ?? '',
+      doseUnit: json['doseUnit'] as String? ?? '',
+      route: json['route'] as String? ?? '',
+      instructions: json['instructions'] as String? ?? '',
+      startDate: _parseManagerDateTime(json['startDate'] as String),
+      endDate: json['endDate'] == null
+          ? null
+          : _parseManagerDateTime(json['endDate'] as String),
+      isActive: json['isActive'] as bool? ?? true,
+      isControlledDrug: json['isControlledDrug'] as bool? ?? false,
+      requiresWitness: json['requiresWitness'] as bool? ?? false,
+      isPrn: json['isPRN'] as bool? ?? false,
+      sourceType: json['sourceType'] as String? ?? 'MANUAL_ENTRY',
+      createdByUserId: json['createdByUserId'] as String?,
+      createdByUserName: json['createdByUserName'] as String?,
+      updatedByUserId: json['updatedByUserId'] as String?,
+      updatedByUserName: json['updatedByUserName'] as String?,
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+      updatedAt: _parseManagerDateTime(json['updatedAt'] as String),
+      deactivatedAt: json['deactivatedAt'] == null
+          ? null
+          : _parseManagerDateTime(json['deactivatedAt'] as String),
+      deactivationReason: json['deactivationReason'] as String?,
+      schedules: (json['schedules'] as List<dynamic>? ?? const [])
+          .map(
+            (entry) => ManagerMedicationScheduleRecord.fromJson(
+              entry as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
+      prnProtocol: json['prnProtocol'] == null
+          ? null
+          : ManagerPrnProtocolRecord.fromJson(
+              json['prnProtocol'] as Map<String, dynamic>,
+            ),
+      stock: json['stock'] == null
+          ? null
+          : ManagerMedicationStockSummary.fromJson(
+              json['stock'] as Map<String, dynamic>,
+            ),
+    );
+  }
+
+  final String id;
+  final String medicationName;
+  final String? formulation;
+  final String? strength;
+  final String doseAmount;
+  final String doseUnit;
+  final String route;
+  final String instructions;
+  final DateTime startDate;
+  final DateTime? endDate;
+  final bool isActive;
+  final bool isControlledDrug;
+  final bool requiresWitness;
+  final bool isPrn;
+  final String sourceType;
+  final String? createdByUserId;
+  final String? createdByUserName;
+  final String? updatedByUserId;
+  final String? updatedByUserName;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? deactivatedAt;
+  final String? deactivationReason;
+  final List<ManagerMedicationScheduleRecord> schedules;
+  final ManagerPrnProtocolRecord? prnProtocol;
+  final ManagerMedicationStockSummary? stock;
+
+  String get titleLine => [
+    medicationName,
+    strength,
+  ].whereType<String>().where((part) => part.trim().isNotEmpty).join(' ');
+
+  String get doseLine => '$doseAmount $doseUnit via $route';
+}
+
+class ManagerMedicationAdministrationRecord {
+  const ManagerMedicationAdministrationRecord({
+    required this.id,
+    required this.doseInstanceId,
+    required this.residentId,
+    required this.residentName,
+    required this.roomLabel,
+    required this.shiftId,
+    required this.medicationOrderId,
+    required this.medicationName,
+    required this.strength,
+    required this.formulation,
+    required this.eventType,
+    required this.doseGiven,
+    required this.doseUnit,
+    required this.reason,
+    required this.notes,
+    required this.recordedByUserId,
+    required this.recordedByUserName,
+    required this.recordedAt,
+    required this.witnessUserId,
+    required this.witnessUserName,
+    required this.createdAt,
+  });
+
+  factory ManagerMedicationAdministrationRecord.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return ManagerMedicationAdministrationRecord(
+      id: json['id'] as String,
+      doseInstanceId: json['doseInstanceId'] as String?,
+      residentId: json['residentId'] as String,
+      residentName: json['residentName'] as String? ?? 'Resident',
+      roomLabel: json['roomLabel'] as String? ?? '',
+      shiftId: json['shiftId'] as String? ?? '',
+      medicationOrderId: json['medicationOrderId'] as String? ?? '',
+      medicationName: json['medicationName'] as String? ?? '',
+      strength: json['strength'] as String?,
+      formulation: json['formulation'] as String?,
+      eventType: json['eventType'] as String? ?? '',
+      doseGiven: json['doseGiven'] as String?,
+      doseUnit: json['doseUnit'] as String?,
+      reason: json['reason'] as String?,
+      notes: json['notes'] as String?,
+      recordedByUserId: json['recordedByUserId'] as String?,
+      recordedByUserName: json['recordedByUserName'] as String?,
+      recordedAt: _parseManagerDateTime(json['recordedAt'] as String),
+      witnessUserId: json['witnessUserId'] as String?,
+      witnessUserName: json['witnessUserName'] as String?,
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+    );
+  }
+
+  final String id;
+  final String? doseInstanceId;
+  final String residentId;
+  final String residentName;
+  final String roomLabel;
+  final String shiftId;
+  final String medicationOrderId;
+  final String medicationName;
+  final String? strength;
+  final String? formulation;
+  final String eventType;
+  final String? doseGiven;
+  final String? doseUnit;
+  final String? reason;
+  final String? notes;
+  final String? recordedByUserId;
+  final String? recordedByUserName;
+  final DateTime recordedAt;
+  final String? witnessUserId;
+  final String? witnessUserName;
+  final DateTime createdAt;
+
+  String get medicationLabel => [
+    medicationName,
+    strength,
+  ].whereType<String>().where((part) => part.trim().isNotEmpty).join(' ');
+}
+
+class ManagerMedicationChangeLogRecord {
+  const ManagerMedicationChangeLogRecord({
+    required this.id,
+    required this.medicationOrderId,
+    required this.residentId,
+    required this.medicationName,
+    required this.changedByUserId,
+    required this.changedByUserName,
+    required this.changeType,
+    required this.previousValueJson,
+    required this.newValueJson,
+    required this.reason,
+    required this.createdAt,
+  });
+
+  factory ManagerMedicationChangeLogRecord.fromJson(Map<String, dynamic> json) {
+    return ManagerMedicationChangeLogRecord(
+      id: json['id'] as String,
+      medicationOrderId: json['medicationOrderId'] as String,
+      residentId: json['residentId'] as String,
+      medicationName: json['medicationName'] as String? ?? '',
+      changedByUserId: json['changedByUserId'] as String?,
+      changedByUserName: json['changedByUserName'] as String?,
+      changeType: json['changeType'] as String? ?? '',
+      previousValueJson: json['previousValueJson'],
+      newValueJson: json['newValueJson'],
+      reason: json['reason'] as String? ?? '',
+      createdAt: _parseManagerDateTime(json['createdAt'] as String),
+    );
+  }
+
+  final String id;
+  final String medicationOrderId;
+  final String residentId;
+  final String medicationName;
+  final String? changedByUserId;
+  final String? changedByUserName;
+  final String changeType;
+  final Object? previousValueJson;
+  final Object? newValueJson;
+  final String reason;
+  final DateTime createdAt;
+}
+
+class ManagerMedicationOrderDraft {
+  const ManagerMedicationOrderDraft({
+    required this.medicationName,
+    required this.formulation,
+    required this.strength,
+    required this.doseAmount,
+    required this.doseUnit,
+    required this.route,
+    required this.instructions,
+    required this.startDateIso,
+    required this.endDateIso,
+    required this.isControlledDrug,
+    required this.requiresWitness,
+    required this.isPrn,
+    required this.sourceType,
+    this.changeReason,
+    this.reason,
+  });
+
+  final String medicationName;
+  final String formulation;
+  final String strength;
+  final String doseAmount;
+  final String doseUnit;
+  final String route;
+  final String instructions;
+  final String startDateIso;
+  final String? endDateIso;
+  final bool isControlledDrug;
+  final bool requiresWitness;
+  final bool isPrn;
+  final String sourceType;
+  final String? changeReason;
+  final String? reason;
+
+  Map<String, dynamic> toCreateJson() {
+    return {
+      'medicationName': medicationName,
+      'formulation': formulation.isEmpty ? null : formulation,
+      'strength': strength.isEmpty ? null : strength,
+      'doseAmount': doseAmount,
+      'doseUnit': doseUnit,
+      'route': route,
+      'instructions': instructions,
+      'startDate': startDateIso,
+      'endDate': endDateIso,
+      'isControlledDrug': isControlledDrug,
+      'requiresWitness': requiresWitness,
+      'isPRN': isPrn,
+      'sourceType': sourceType,
+      'changeReason': changeReason,
+    };
+  }
+
+  Map<String, dynamic> toUpdateJson() {
+    return {
+      'medicationName': medicationName,
+      'formulation': formulation.isEmpty ? null : formulation,
+      'strength': strength.isEmpty ? null : strength,
+      'doseAmount': doseAmount,
+      'doseUnit': doseUnit,
+      'route': route,
+      'instructions': instructions,
+      'startDate': startDateIso,
+      'endDate': endDateIso,
+      'isControlledDrug': isControlledDrug,
+      'requiresWitness': requiresWitness,
+      'isPRN': isPrn,
+      'sourceType': sourceType,
+      'reason': reason,
+    };
+  }
+}
+
+class ManagerMedicationScheduleDraft {
+  const ManagerMedicationScheduleDraft({
+    required this.roundLabel,
+    required this.anchorType,
+    required this.windowStartOffsetMinutes,
+    required this.windowEndOffsetMinutes,
+    required this.fixedTimeLocal,
+    required this.daysOfWeek,
+  });
+
+  final String roundLabel;
+  final String anchorType;
+  final int? windowStartOffsetMinutes;
+  final int? windowEndOffsetMinutes;
+  final String? fixedTimeLocal;
+  final List<String> daysOfWeek;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'roundLabel': roundLabel,
+      'anchorType': anchorType,
+      'windowStartOffsetMinutes': windowStartOffsetMinutes,
+      'windowEndOffsetMinutes': windowEndOffsetMinutes,
+      'fixedTimeLocal': fixedTimeLocal,
+      'daysOfWeek': daysOfWeek,
+    };
+  }
+}
+
+class ManagerPrnProtocolDraft {
+  const ManagerPrnProtocolDraft({
+    required this.indication,
+    required this.whenToOffer,
+    required this.doseInstructions,
+    required this.minimumIntervalMinutes,
+    required this.maxDosePer24Hours,
+    required this.expectedEffect,
+    required this.monitoringRequired,
+    required this.whenToEscalate,
+  });
+
+  final String indication;
+  final String whenToOffer;
+  final String doseInstructions;
+  final int? minimumIntervalMinutes;
+  final int? maxDosePer24Hours;
+  final String expectedEffect;
+  final String monitoringRequired;
+  final String whenToEscalate;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'indication': indication,
+      'whenToOffer': whenToOffer,
+      'doseInstructions': doseInstructions,
+      'minimumIntervalMinutes': minimumIntervalMinutes,
+      'maxDosePer24Hours': maxDosePer24Hours,
+      'expectedEffect': expectedEffect.isEmpty ? null : expectedEffect,
+      'monitoringRequired': monitoringRequired.isEmpty
+          ? null
+          : monitoringRequired,
+      'whenToEscalate': whenToEscalate.isEmpty ? null : whenToEscalate,
+    };
+  }
+}
+
+class ManagerMedicationAllergyDraft {
+  const ManagerMedicationAllergyDraft({
+    required this.substance,
+    required this.reaction,
+    required this.severity,
+  });
+
+  final String substance;
+  final String reaction;
+  final String severity;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'substance': substance,
+      'reaction': reaction.isEmpty ? null : reaction,
+      'severity': severity.isEmpty ? null : severity,
+    };
+  }
 }
 
 class ManagerResidentDraft {
@@ -525,7 +1327,7 @@ class ManagerResidentDraft {
     required this.floorNumber,
     required this.unitLabel,
     required this.recognitionImageKey,
-    required this.careSummary,
+    required this.aboutMe,
     required this.isActive,
     required this.baselinePriority,
   });
@@ -535,7 +1337,7 @@ class ManagerResidentDraft {
   final int floorNumber;
   final String unitLabel;
   final String recognitionImageKey;
-  final String careSummary;
+  final String aboutMe;
   final bool isActive;
   final ManagerResidentPriorityLevel baselinePriority;
 
@@ -546,7 +1348,7 @@ class ManagerResidentDraft {
       'floorNumber': floorNumber,
       'unitLabel': unitLabel,
       'recognitionImageKey': recognitionImageKey,
-      'careSummary': careSummary,
+      'aboutMe': aboutMe,
       'isActive': isActive,
       'baselinePriority': baselinePriority.apiValue,
     };
