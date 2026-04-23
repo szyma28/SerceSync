@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sercesync_web/main.dart';
+import 'package:sercesync_web/src/manager/manager_reporting.dart';
+import 'package:sercesync_web/src/manager/manager_shared.dart';
 
 class _FakeManagerFileDownloader implements ManagerFileDownloader {
   const _FakeManagerFileDownloader({this.shouldSucceed = true});
@@ -38,6 +40,12 @@ Future<void> _selectResidentBaselinePriority(
 }
 
 void main() {
+  test('CSV export cells are neutralised for spreadsheet safety', () {
+    expect(escapeCsvCellForExport('=2+2'), "\"'=2+2\"");
+    expect(escapeCsvCellForExport('@incident'), "\"'@incident\"");
+    expect(escapeCsvCellForExport('Routine note'), '"Routine note"');
+  });
+
   test(
     'parses medication exceptions without an explicit id by falling back to doseInstanceId',
     () {
@@ -166,6 +174,34 @@ void main() {
     expect(apiClient.requestLog.first, 'restoreSession');
   });
 
+  testWidgets('shows workspace shell placeholders while restoring a session', (
+    WidgetTester tester,
+  ) async {
+    final apiClient = _FakeManagerApiClient()
+      ..restoredSession = const ManagerSession(
+        accessToken: '',
+        user: ManagerUser(
+          id: 'manager-1',
+          email: 'manager@sercesync.local',
+          displayName: 'Morgan Manager',
+          role: ManagerUserRole.manager,
+        ),
+      );
+
+    await tester.binding.setSurfaceSize(const Size(1440, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      SerceSyncWebApp(
+        apiClient: apiClient,
+        fileDownloader: const _FakeManagerFileDownloader(),
+      ),
+    );
+
+    expect(find.byType(ManagerSkeletonCard), findsWidgets);
+    expect(find.text('Manager workspace'), findsNothing);
+  });
+
   testWidgets('shows a retry state when session restore fails unexpectedly', (
     WidgetTester tester,
   ) async {
@@ -224,6 +260,22 @@ void main() {
     expect(find.text('Hallway Fall'), findsOneWidget);
     expect(find.text('Acknowledge'), findsWidgets);
     expect(find.text('Resolve'), findsOneWidget);
+  });
+
+  testWidgets('dashboard header shows a live freshness label', (
+    WidgetTester tester,
+  ) async {
+    final apiClient = _FakeManagerApiClient();
+    await _pumpManagerWorkspace(tester, apiClient: apiClient);
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text && (widget.data?.startsWith('Live ') ?? false),
+        description: 'dashboard live freshness label',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('dashboard refreshes when any active shift stream updates', (
@@ -302,6 +354,25 @@ void main() {
       apiClient.requestLog,
       contains('acknowledge:incident-cedar-red:shift-3'),
     );
+  });
+
+  testWidgets('incident acknowledge uses the contextual success notice', (
+    WidgetTester tester,
+  ) async {
+    final apiClient = _FakeManagerApiClient();
+    await _pumpManagerWorkspace(tester, apiClient: apiClient);
+
+    final targetRow = find.byKey(
+      const ValueKey('exception-row-incident-open-red'),
+    );
+    await tester.ensureVisible(targetRow);
+    await tester.tap(
+      find.descendant(of: targetRow, matching: find.text('Acknowledge')),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Incident marked as acknowledged.'), findsOneWidget);
   });
 
   testWidgets(
@@ -647,7 +718,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('CQC evidence pack'), findsOneWidget);
-    expect(find.text('Operational evidence only'), findsWidgets);
+    expect(find.text('Live export snapshot'), findsWidgets);
     expect(find.text('Summary CSV'), findsOneWidget);
     expect(find.text('Incident register CSV'), findsOneWidget);
     expect(find.text('Medication audit CSV'), findsOneWidget);
@@ -697,43 +768,48 @@ void main() {
     );
   });
 
-  testWidgets('reporting tab shows a helpful message when download start fails', (
-    WidgetTester tester,
-  ) async {
-    final apiClient = _FakeManagerApiClient();
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'reporting tab shows a helpful message when download start fails',
+    (WidgetTester tester) async {
+      final apiClient = _FakeManagerApiClient();
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    await tester.pumpWidget(
-      SerceSyncWebApp(
-        apiClient: apiClient,
-        fileDownloader: const _FakeManagerFileDownloader(shouldSucceed: false),
-      ),
-    );
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        SerceSyncWebApp(
+          apiClient: apiClient,
+          fileDownloader: const _FakeManagerFileDownloader(
+            shouldSucceed: false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Email address'),
-      'manager@sercesync.local',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Password'),
-      'Password123!',
-    );
-    await tester.tap(find.text('Open manager dashboard'));
-    await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email address'),
+        'manager@sercesync.local',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'Password123!',
+      );
+      await tester.tap(find.text('Open manager dashboard'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Reporting'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Reporting'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Summary CSV'));
-    await tester.pump();
+      await tester.tap(find.text('Summary CSV'));
+      await tester.pump();
 
-    expect(
-      find.text('Could not start download for cqc-evidence-pack-summary.csv.'),
-      findsOneWidget,
-    );
-  });
+      expect(
+        find.text(
+          'Could not start download for cqc-evidence-pack-summary.csv.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 }
 
 Future<void> _pumpManagerWorkspace(

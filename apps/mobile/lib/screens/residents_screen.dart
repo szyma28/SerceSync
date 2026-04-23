@@ -1,33 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../api/api_client.dart';
+import '../controllers/mobile_session_controller.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
-import 'resident_detail_screen.dart';
+import '../widgets/data_freshness_indicator.dart';
+import '../widgets/loading_skeleton.dart';
+import '../widgets/resume_refresh_mixin.dart';
 import '../widgets/screen_message_state.dart';
+import '../widgets/status_banner.dart';
+import 'resident_detail_screen.dart';
 
 class ResidentsScreen extends StatefulWidget {
-  const ResidentsScreen({
-    super.key,
-    required this.apiClient,
-    required this.accessToken,
-    required this.currentCarerName,
-    required this.currentUserRole,
-  });
-
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
-  final String currentCarerName;
-  final AppUserRole currentUserRole;
+  const ResidentsScreen({super.key});
 
   @override
   State<ResidentsScreen> createState() => ResidentsScreenState();
 }
 
-class ResidentsScreenState extends State<ResidentsScreen> {
+class ResidentsScreenState extends State<ResidentsScreen>
+    with WidgetsBindingObserver, ResumeRefreshStateMixin {
   bool _isLoading = true;
   String? _errorMessage;
   List<ResidentListItem> _residents = const [];
+  DateTime? _lastUpdatedAt;
+  bool _showingCachedData = false;
 
   @override
   void initState() {
@@ -36,35 +33,60 @@ class ResidentsScreenState extends State<ResidentsScreen> {
   }
 
   Future<void> _loadResidents() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    final sessionController = context.read<MobileSessionController>();
+    final session = await sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    if (session == null) {
+      return;
+    }
+
+    final workspaceRepository = sessionController.workspaceRepository;
+    final cachedResidents = await workspaceRepository.readCachedResidents(
+      session,
+    );
+    if (cachedResidents != null && mounted) {
+      setState(() {
+        _residents = cachedResidents.data;
+        _lastUpdatedAt = cachedResidents.fetchedAt;
+        _showingCachedData = true;
+        _errorMessage = null;
+      });
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
-      final residents = await widget.apiClient.getResidents(
-        accessToken: widget.accessToken,
+      final refreshedResidents = await workspaceRepository.refreshResidents(
+        session,
       );
       if (!mounted) return;
-      setState(() => _residents = residents);
-    } on ApiException catch (error) {
+      setState(() {
+        _residents = refreshedResidents.data;
+        _lastUpdatedAt = refreshedResidents.fetchedAt;
+        _showingCachedData = false;
+      });
+    } on Exception catch (error) {
       if (!mounted) return;
-      setState(() => _errorMessage = error.message);
+      setState(
+        () => _errorMessage = error.toString().replaceFirst('Exception: ', ''),
+      );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   void openResidentById(String residentId) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ResidentDetailScreen(
-          residentId: residentId,
-          apiClient: widget.apiClient,
-          accessToken: widget.accessToken,
-          currentCarerName: widget.currentCarerName,
-          currentUserRole: widget.currentUserRole,
-        ),
+        builder: (_) => ResidentDetailScreen(residentId: residentId),
       ),
     );
   }
@@ -74,17 +96,36 @@ class ResidentsScreenState extends State<ResidentsScreen> {
   }
 
   @override
+  bool get canTriggerResumeRefresh =>
+      context.read<MobileSessionController>().hasActiveSession;
+
+  @override
+  bool get hasVisibleContentForResumeRefresh => _residents.isNotEmpty;
+
+  @override
+  Future<void> refreshAfterResume() => _loadResidents();
+
+  @override
   Widget build(BuildContext context) {
     final unitLabel = _residents.isNotEmpty ? _residents.first.unitLabel : null;
     final floorNumber = _residents.isNotEmpty
         ? _residents.first.floorNumber
         : null;
+    final showStatusBanner = _showingCachedData || _errorMessage != null;
+    final freshnessIndicator = !showStatusBanner && _residents.isNotEmpty
+        ? DataFreshnessIndicator(
+            lastUpdatedAt: _lastUpdatedAt,
+            isRefreshing: _isLoading,
+            label: 'Resident list is live',
+          )
+        : const SizedBox.shrink();
 
     return Container(
       decoration: AppTheme.atmosphericBackground,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           title: Text(
             'Residents',
             style: Theme.of(context).textTheme.headlineSmall,
@@ -98,9 +139,7 @@ class ResidentsScreenState extends State<ResidentsScreen> {
         ),
         body: SafeArea(
           child: _isLoading && _residents.isEmpty
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primaryBlue),
-                )
+              ? const _ResidentsLoadingSkeleton()
               : _errorMessage != null && _residents.isEmpty
               ? ScreenMessageState(
                   imageAssetPath: 'assets/images/resident_profile_01.png',
@@ -122,6 +161,22 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
                     children: [
+                      if (showStatusBanner)
+                        StatusBanner(
+                          icon: _errorMessage == null
+                              ? Icons.cloud_off_outlined
+                              : Icons.wifi_tethering_error_rounded,
+                          title: _errorMessage == null
+                              ? 'Showing cached residents'
+                              : 'Using cached residents',
+                          message:
+                              _errorMessage ??
+                              'This list will refresh when the connection comes back.',
+                          lastUpdatedAt: _lastUpdatedAt,
+                          actionLabel: 'Retry',
+                          onAction: _isLoading ? null : _loadResidents,
+                        ),
+                      freshnessIndicator,
                       _ResidentsScopeCard(
                         residentCount: _residents.length,
                         unitLabel: unitLabel ?? 'Assigned floor',
@@ -139,6 +194,77 @@ class ResidentsScreenState extends State<ResidentsScreen> {
                 ),
         ),
       ),
+    );
+  }
+}
+
+class _ResidentsLoadingSkeleton extends StatelessWidget {
+  const _ResidentsLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
+      children: const [
+        SkeletonCard(
+          child: Row(
+            children: [
+              SkeletonBlock(height: 42, width: 42, radius: 12),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(height: 18, width: 120, radius: 10),
+                    SizedBox(height: 8),
+                    SkeletonBlock(height: 14, width: 180, radius: 10),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Row(
+            children: [
+              SkeletonAvatar(),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(height: 16, width: 140, radius: 10),
+                    SizedBox(height: 8),
+                    SkeletonBlock(height: 14, width: 200, radius: 10),
+                    SizedBox(height: 8),
+                    SkeletonBlock(height: 12, width: 120, radius: 10),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Row(
+            children: [
+              SkeletonAvatar(),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(height: 16, width: 132, radius: 10),
+                    SizedBox(height: 8),
+                    SkeletonBlock(height: 14, width: 180, radius: 10),
+                    SizedBox(height: 8),
+                    SkeletonBlock(height: 12, width: 110, radius: 10),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,36 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../api/api_client.dart';
 import '../controllers/mobile_session_controller.dart';
 import '../controllers/shift_workspace_controller.dart';
-import '../models/handover.dart';
-import '../models/user.dart';
 import '../theme/app_theme.dart';
-import 'login_screen.dart';
+import '../widgets/resume_refresh_mixin.dart';
 import 'my_shift_screen.dart';
 import 'priorities_screen.dart';
 import 'residents_screen.dart';
 
 class ShiftWorkspaceScreen extends StatefulWidget {
-  const ShiftWorkspaceScreen({
-    super.key,
-    required this.apiClient,
-    required this.accessToken,
-    required this.user,
-    required this.snapshot,
-  });
-
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
-  final LoginUser user;
-  final HandoverSnapshot snapshot;
+  const ShiftWorkspaceScreen({super.key});
 
   @override
   State<ShiftWorkspaceScreen> createState() => _ShiftWorkspaceScreenState();
 }
 
-class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
+class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen>
+    with WidgetsBindingObserver, ResumeRefreshStateMixin {
   late final ShiftWorkspaceController _workspaceController;
   int _currentIndex = 0;
 
@@ -38,10 +27,7 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
   void initState() {
     super.initState();
     _workspaceController = ShiftWorkspaceController(
-      apiClient: widget.apiClient,
-      accessToken: widget.accessToken,
-      user: widget.user,
-      snapshot: widget.snapshot,
+      sessionController: context.read<MobileSessionController>(),
     );
   }
 
@@ -53,10 +39,24 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
 
   void _logout() {
     context.read<MobileSessionController>().clearSession();
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  @override
+  bool get canTriggerResumeRefresh =>
+      context.read<MobileSessionController>().hasActiveSession;
+
+  @override
+  bool get hasVisibleContentForResumeRefresh =>
+      _workspaceController.tasks.isNotEmpty ||
+      _workspaceController.overview != null;
+
+  @override
+  Future<void> refreshAfterResume() async {
+    await Future.wait([
+      _workspaceController.refreshPriorities(),
+      _workspaceController.refreshOverview(),
+    ]);
   }
 
   @override
@@ -71,12 +71,7 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
             index: _currentIndex,
             children: [
               const PrioritiesScreen(),
-              ResidentsScreen(
-                apiClient: widget.apiClient,
-                accessToken: widget.accessToken,
-                currentCarerName: widget.user.displayName,
-                currentUserRole: widget.user.role,
-              ),
+              const ResidentsScreen(),
               MyShiftScreen(onLogout: _logout),
             ],
           ),
@@ -91,7 +86,9 @@ class _ShiftWorkspaceScreenState extends State<ShiftWorkspaceScreen> {
               ],
             ),
             child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(30),
+              ),
               child: BottomNavigationBar(
                 currentIndex: _currentIndex,
                 onTap: (index) => setState(() => _currentIndex = index),

@@ -5,6 +5,50 @@ export 'shared_models.dart';
 
 enum PriorityBand { urgentNow, dueWithinHour, reminders }
 
+enum OfflineSyncStatus { synced, pending, failed, conflict }
+
+extension OfflineSyncStatusX on OfflineSyncStatus {
+  String get storageValue {
+    switch (this) {
+      case OfflineSyncStatus.synced:
+        return 'synced';
+      case OfflineSyncStatus.pending:
+        return 'pending';
+      case OfflineSyncStatus.failed:
+        return 'failed';
+      case OfflineSyncStatus.conflict:
+        return 'conflict';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case OfflineSyncStatus.synced:
+        return 'Synced';
+      case OfflineSyncStatus.pending:
+        return 'Pending sync';
+      case OfflineSyncStatus.failed:
+        return 'Failed';
+      case OfflineSyncStatus.conflict:
+        return 'Needs review';
+    }
+  }
+
+  static OfflineSyncStatus fromStorageValue(String value) {
+    switch (value) {
+      case 'pending':
+        return OfflineSyncStatus.pending;
+      case 'failed':
+        return OfflineSyncStatus.failed;
+      case 'conflict':
+        return OfflineSyncStatus.conflict;
+      case 'synced':
+      default:
+        return OfflineSyncStatus.synced;
+    }
+  }
+}
+
 enum ResidentEntryType {
   careGiven,
   observation,
@@ -637,6 +681,9 @@ class ResidentTimelineEntry {
     this.personalCareSubtype,
     this.mealType,
     this.mealIntakeAmount,
+    this.syncStatus = OfflineSyncStatus.synced,
+    this.syncMessage,
+    this.localMutationId,
   });
 
   factory ResidentTimelineEntry.fromJson(Map<String, dynamic> json) {
@@ -665,6 +712,11 @@ class ResidentTimelineEntry {
             ),
           )
           .toList(),
+      syncStatus: json['syncStatus'] == null
+          ? OfflineSyncStatus.synced
+          : OfflineSyncStatusX.fromStorageValue(json['syncStatus'] as String),
+      syncMessage: json['syncMessage'] as String?,
+      localMutationId: json['localMutationId'] as String?,
     );
   }
 
@@ -678,6 +730,62 @@ class ResidentTimelineEntry {
   final String authorName;
   final DateTime timestamp;
   final List<ResidentTimelineMediaItem> media;
+  final OfflineSyncStatus syncStatus;
+  final String? syncMessage;
+  final String? localMutationId;
+
+  ResidentTimelineEntry copyWith({
+    String? id,
+    ResidentEntryType? type,
+    PersonalCareSubtype? personalCareSubtype,
+    MealType? mealType,
+    MealIntakeAmount? mealIntakeAmount,
+    String? title,
+    String? details,
+    String? authorName,
+    DateTime? timestamp,
+    List<ResidentTimelineMediaItem>? media,
+    OfflineSyncStatus? syncStatus,
+    String? syncMessage,
+    String? localMutationId,
+  }) {
+    return ResidentTimelineEntry(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      personalCareSubtype: personalCareSubtype ?? this.personalCareSubtype,
+      mealType: mealType ?? this.mealType,
+      mealIntakeAmount: mealIntakeAmount ?? this.mealIntakeAmount,
+      title: title ?? this.title,
+      details: details ?? this.details,
+      authorName: authorName ?? this.authorName,
+      timestamp: timestamp ?? this.timestamp,
+      media: media ?? this.media,
+      syncStatus: syncStatus ?? this.syncStatus,
+      syncMessage: syncMessage ?? this.syncMessage,
+      localMutationId: localMutationId ?? this.localMutationId,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'type': type.apiValue,
+      if (personalCareSubtype != null)
+        'personalCareSubtype': personalCareSubtype!.apiValue,
+      if (mealType != null) 'mealType': mealType!.apiValue,
+      if (mealIntakeAmount != null)
+        'mealIntakeAmount': mealIntakeAmount!.apiValue,
+      'title': title,
+      'details': details,
+      'authorName': authorName,
+      'timestamp': timestamp.toUtc().toIso8601String(),
+      'media': media.map((item) => item.toJson()).toList(),
+      if (syncStatus != OfflineSyncStatus.synced)
+        'syncStatus': syncStatus.storageValue,
+      if (syncMessage != null) 'syncMessage': syncMessage,
+      if (localMutationId != null) 'localMutationId': localMutationId,
+    };
+  }
 }
 
 class MedicationTaskSummary {
@@ -891,6 +999,17 @@ class ResidentTimelineMediaItem {
   final int byteSize;
   final String downloadPath;
   final DateTime createdAt;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'originalFileName': originalFileName,
+      'mediaType': mediaType,
+      'byteSize': byteSize,
+      'downloadPath': downloadPath,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+    };
+  }
 }
 
 class ResidentIncidentMediaItem {
@@ -917,6 +1036,16 @@ class ResidentIncidentMediaItem {
   final String mediaType;
   final int byteSize;
   final DateTime createdAt;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'originalFileName': originalFileName,
+      'mediaType': mediaType,
+      'byteSize': byteSize,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+    };
+  }
 }
 
 class ResidentIncident {
@@ -936,6 +1065,9 @@ class ResidentIncident {
     this.acknowledgedByName,
     this.resolvedAt,
     this.resolvedByName,
+    this.syncStatus = OfflineSyncStatus.synced,
+    this.syncMessage,
+    this.localMutationId,
   });
 
   factory ResidentIncident.fromJson(Map<String, dynamic> json) {
@@ -967,6 +1099,11 @@ class ResidentIncident {
             ),
           )
           .toList(),
+      syncStatus: json['syncStatus'] == null
+          ? OfflineSyncStatus.synced
+          : OfflineSyncStatusX.fromStorageValue(json['syncStatus'] as String),
+      syncMessage: json['syncMessage'] as String?,
+      localMutationId: json['localMutationId'] as String?,
     );
   }
 
@@ -985,6 +1122,77 @@ class ResidentIncident {
   final DateTime createdAt;
   final String createdByName;
   final List<ResidentIncidentMediaItem> evidence;
+  final OfflineSyncStatus syncStatus;
+  final String? syncMessage;
+  final String? localMutationId;
+
+  ResidentIncident copyWith({
+    String? id,
+    IncidentSeverity? severity,
+    IncidentStatus? status,
+    IncidentCategory? category,
+    String? categoryLabel,
+    String? title,
+    String? details,
+    DateTime? occurredAt,
+    DateTime? acknowledgedAt,
+    String? acknowledgedByName,
+    DateTime? resolvedAt,
+    String? resolvedByName,
+    DateTime? createdAt,
+    String? createdByName,
+    List<ResidentIncidentMediaItem>? evidence,
+    OfflineSyncStatus? syncStatus,
+    String? syncMessage,
+    String? localMutationId,
+  }) {
+    return ResidentIncident(
+      id: id ?? this.id,
+      severity: severity ?? this.severity,
+      status: status ?? this.status,
+      category: category ?? this.category,
+      categoryLabel: categoryLabel ?? this.categoryLabel,
+      title: title ?? this.title,
+      details: details ?? this.details,
+      occurredAt: occurredAt ?? this.occurredAt,
+      acknowledgedAt: acknowledgedAt ?? this.acknowledgedAt,
+      acknowledgedByName: acknowledgedByName ?? this.acknowledgedByName,
+      resolvedAt: resolvedAt ?? this.resolvedAt,
+      resolvedByName: resolvedByName ?? this.resolvedByName,
+      createdAt: createdAt ?? this.createdAt,
+      createdByName: createdByName ?? this.createdByName,
+      evidence: evidence ?? this.evidence,
+      syncStatus: syncStatus ?? this.syncStatus,
+      syncMessage: syncMessage ?? this.syncMessage,
+      localMutationId: localMutationId ?? this.localMutationId,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'severity': severity.apiValue,
+      'status': status.apiValue,
+      'category': category.apiValue,
+      'categoryLabel': categoryLabel,
+      'title': title,
+      'details': details,
+      'occurredAt': occurredAt.toUtc().toIso8601String(),
+      if (acknowledgedAt != null)
+        'acknowledgedAt': acknowledgedAt!.toUtc().toIso8601String(),
+      if (acknowledgedByName != null) 'acknowledgedByName': acknowledgedByName,
+      if (resolvedAt != null)
+        'resolvedAt': resolvedAt!.toUtc().toIso8601String(),
+      if (resolvedByName != null) 'resolvedByName': resolvedByName,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+      'createdByName': createdByName,
+      'evidence': evidence.map((item) => item.toJson()).toList(),
+      if (syncStatus != OfflineSyncStatus.synced)
+        'syncStatus': syncStatus.storageValue,
+      if (syncMessage != null) 'syncMessage': syncMessage,
+      if (localMutationId != null) 'localMutationId': localMutationId,
+    };
+  }
 }
 
 class TimelineEvidenceFile {
@@ -1123,6 +1331,50 @@ class ResidentDetail extends ResidentProfile {
   final List<ResidentIncident> activeIncidents;
   final List<ResidentTaskSummary> currentTasks;
   final List<ResidentTimelineEntry> timeline;
+
+  ResidentDetail copyWith({
+    String? id,
+    String? fullName,
+    String? roomLabel,
+    int? floorNumber,
+    String? unitLabel,
+    String? recognitionImageKey,
+    String? todaySummary,
+    String? assignmentContext,
+    String? contextLine,
+    List<String>? alerts,
+    String? aboutMe,
+    ResidentPriorityLevel? baselinePriority,
+    ResidentPriorityLevel? effectivePriority,
+    ResidentPrioritySource? prioritySource,
+    int? activeIncidentCount,
+    MedicationTaskSummary? medicationSummary,
+    List<ResidentIncident>? activeIncidents,
+    List<ResidentTaskSummary>? currentTasks,
+    List<ResidentTimelineEntry>? timeline,
+  }) {
+    return ResidentDetail(
+      id: id ?? this.id,
+      fullName: fullName ?? this.fullName,
+      roomLabel: roomLabel ?? this.roomLabel,
+      floorNumber: floorNumber ?? this.floorNumber,
+      unitLabel: unitLabel ?? this.unitLabel,
+      recognitionImageKey: recognitionImageKey ?? this.recognitionImageKey,
+      todaySummary: todaySummary ?? this.todaySummary,
+      assignmentContext: assignmentContext ?? this.assignmentContext,
+      contextLine: contextLine ?? this.contextLine,
+      alerts: alerts ?? this.alerts,
+      aboutMe: aboutMe ?? this.aboutMe,
+      baselinePriority: baselinePriority ?? this.baselinePriority,
+      effectivePriority: effectivePriority ?? this.effectivePriority,
+      prioritySource: prioritySource ?? this.prioritySource,
+      activeIncidentCount: activeIncidentCount ?? this.activeIncidentCount,
+      medicationSummary: medicationSummary ?? this.medicationSummary,
+      activeIncidents: activeIncidents ?? this.activeIncidents,
+      currentTasks: currentTasks ?? this.currentTasks,
+      timeline: timeline ?? this.timeline,
+    );
+  }
 }
 
 class ResidentTimelineEntryDraft {
@@ -1134,6 +1386,24 @@ class ResidentTimelineEntryDraft {
     this.mealIntakeAmount,
     this.evidence,
   });
+
+  factory ResidentTimelineEntryDraft.fromJson(Map<String, dynamic> json) {
+    return ResidentTimelineEntryDraft(
+      type: ResidentEntryTypeX.fromApiValue(json['type'] as String),
+      details: (json['details'] as String?) ?? '',
+      personalCareSubtype: json['personalCareSubtype'] == null
+          ? null
+          : PersonalCareSubtypeX.fromApiValue(
+              json['personalCareSubtype'] as String,
+            ),
+      mealType: json['mealType'] == null
+          ? null
+          : MealTypeX.fromApiValue(json['mealType'] as String),
+      mealIntakeAmount: json['mealIntakeAmount'] == null
+          ? null
+          : MealIntakeAmountX.fromApiValue(json['mealIntakeAmount'] as String),
+    );
+  }
 
   final ResidentEntryType type;
   final String details;
@@ -1163,6 +1433,15 @@ class ResidentIncidentDraft {
     required this.details,
     this.evidence,
   });
+
+  factory ResidentIncidentDraft.fromJson(Map<String, dynamic> json) {
+    return ResidentIncidentDraft(
+      severity: IncidentSeverityX.fromApiValue(json['severity'] as String),
+      category: IncidentCategoryX.fromApiValue(json['category'] as String),
+      title: json['title'] as String,
+      details: json['details'] as String,
+    );
+  }
 
   final IncidentSeverity severity;
   final IncidentCategory category;

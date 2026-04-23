@@ -6,6 +6,7 @@ import request from 'supertest';
 import { getAuditDetailString } from './../src/audit-event-details';
 import { AppModule } from './../src/app.module';
 import { MANAGER_SESSION_COOKIE_NAME } from './../src/auth/auth.constants';
+import { configureHttpApp } from './../src/http-security';
 import { MedicationsService } from './../src/medications/medications.service';
 import { ManagerDashboardStreamService } from './../src/manager-dashboard-stream/manager-dashboard-stream.service';
 import { PrismaService } from './../src/prisma/prisma.service';
@@ -27,6 +28,8 @@ describe('SerceSync workflow slices (e2e)', () => {
   let outOfScopeResident: Resident;
   let cedarFloorResident: Resident;
   let nurseUserId: string;
+  const allowedManagerOrigin = 'http://localhost:8080';
+  const disallowedWebOrigin = 'https://evil.example';
 
   const residentNames = [
     'Margaret Evans',
@@ -91,7 +94,6 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   type ManagerBrowserLoginResponse = {
-    accessToken: string;
     user: {
       email: string;
       role: 'MANAGER';
@@ -99,7 +101,6 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   type ManagerSessionResponse = {
-    accessToken: string;
     user: {
       email: string;
       role: 'MANAGER';
@@ -487,11 +488,14 @@ describe('SerceSync workflow slices (e2e)', () => {
   };
 
   beforeAll(async () => {
+    process.env.WEB_APP_URL ??= allowedManagerOrigin;
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    configureHttpApp(app);
     prisma = moduleFixture.get(PrismaService);
     await app.init();
   });
@@ -1100,12 +1104,61 @@ describe('SerceSync workflow slices (e2e)', () => {
     expect(acknowledgeResponse.body.acknowledgedAt).toEqual(expect.any(String));
   });
 
+  it('applies security headers and only grants credentialed CORS access to allowlisted web origins', async () => {
+    const allowedResponse = await request(app.getHttpServer())
+      .get('/')
+      .set('Origin', allowedManagerOrigin)
+      .expect(200);
+
+    expect(allowedResponse.headers['access-control-allow-origin']).toBe(
+      allowedManagerOrigin,
+    );
+    expect(allowedResponse.headers['access-control-allow-credentials']).toBe(
+      'true',
+    );
+    expect(allowedResponse.headers['x-content-type-options']).toBe('nosniff');
+    expect(allowedResponse.headers['x-frame-options']).toBe('DENY');
+
+    const blockedResponse = await request(app.getHttpServer())
+      .get('/')
+      .set('Origin', disallowedWebOrigin)
+      .expect(200);
+
+    expect(blockedResponse.headers['access-control-allow-origin']).toBeFalsy();
+    expect(
+      blockedResponse.headers['access-control-allow-credentials'],
+    ).toBeFalsy();
+  });
+
+  it('rate limits repeated login attempts for the same email identity', async () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({
+          email: 'blocked.user@sercesync.local',
+          password: 'WrongPassword123!',
+        })
+        .expect(401);
+    }
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({
+        email: 'blocked.user@sercesync.local',
+        password: 'WrongPassword123!',
+      })
+      .expect(429);
+  });
+
   it('creates and restores a manager browser session with an HttpOnly cookie', async () => {
     const loginResponse = await loginManagerBrowser('manager@sercesync.local');
     const sessionCookie = loginResponse.headers['set-cookie'];
 
-    expect(loginResponse.body.accessToken).toEqual(expect.any(String));
+    expect(
+      (loginResponse.body as Record<string, unknown>).accessToken,
+    ).toBeUndefined();
     expect(loginResponse.body.user.email).toBe('manager@sercesync.local');
+    expect(loginResponse.headers['cache-control']).toContain('no-store');
     expect(sessionCookie).toEqual(
       expect.arrayContaining([
         expect.stringContaining(`${MANAGER_SESSION_COOKIE_NAME}=`),
@@ -1129,7 +1182,10 @@ describe('SerceSync workflow slices (e2e)', () => {
       email: 'manager@sercesync.local',
       role: 'MANAGER',
     });
-    expect(sessionResponse.body.accessToken).toEqual(expect.any(String));
+    expect(
+      (sessionResponse.body as Record<string, unknown>).accessToken,
+    ).toBeUndefined();
+    expect(sessionResponse.headers['cache-control']).toContain('no-store');
 
     const shiftsResponse = typedResponse<ManagerShiftsResponse>(
       await request(app.getHttpServer())
@@ -1144,15 +1200,63 @@ describe('SerceSync workflow slices (e2e)', () => {
       await request(app.getHttpServer())
         .post('/auth/manager/logout')
         .set('Cookie', sessionCookie)
+        .set('Origin', allowedManagerOrigin)
         .expect(200),
     );
 
     expect(logoutResponse.body).toEqual({ success: true });
+    expect(logoutResponse.headers['cache-control']).toContain('no-store');
     expect(logoutResponse.headers['set-cookie']).toEqual(
       expect.arrayContaining([
         expect.stringContaining(`${MANAGER_SESSION_COOKIE_NAME}=;`),
       ]),
     );
+  });
+
+  it('blocks cookie-authenticated manager write requests from missing or disallowed browser origins', async () => {
+    const loginResponse = await loginManagerBrowser('manager@sercesync.local');
+    const sessionCookie = loginResponse.headers['set-cookie'];
+
+    await request(app.getHttpServer())
+      .post('/auth/manager/logout')
+      .set('Cookie', sessionCookie)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/manager/residents')
+      .set('Cookie', sessionCookie)
+      .set('Origin', disallowedWebOrigin)
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/manager/residents')
+      .set('Cookie', sessionCookie)
+      .set('Origin', allowedManagerOrigin)
+      .send({})
+      .expect(400);
+  });
+
+  it('marks token-bearing auth responses as non-cacheable', async () => {
+    const loginResponse = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({
+        email: 'carer@sercesync.local',
+        password: 'Password123!',
+      })
+      .expect(201);
+
+    expect(loginResponse.headers['cache-control']).toContain('no-store');
+    expect(loginResponse.headers['pragma']).toBe('no-cache');
+
+    const refreshResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: loginResponse.body.refreshToken,
+      })
+      .expect(200);
+
+    expect(refreshResponse.headers['cache-control']).toContain('no-store');
   });
 
   it('returns all thirty seeded residents to the manager in floor and room order', async () => {
@@ -1374,6 +1478,11 @@ describe('SerceSync workflow slices (e2e)', () => {
 
   it('returns residents with derived priority state and active incidents on detail', async () => {
     const accessToken = await login('carer@sercesync.local');
+    const residentViewAuditCountBefore = await prisma.auditEvent.count({
+      where: {
+        kind: 'RESIDENT_RECORD_VIEWED',
+      },
+    });
 
     const residentsResponse = typedResponse<ResidentsListResponse>(
       await request(app.getHttpServer())
@@ -1486,6 +1595,29 @@ describe('SerceSync workflow slices (e2e)', () => {
         }),
       ]),
     );
+
+    const residentViewAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: {
+        kind: 'RESIDENT_RECORD_VIEWED',
+        residentId: seededResidents[1].id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    expect(await prisma.auditEvent.count({
+      where: {
+        kind: 'RESIDENT_RECORD_VIEWED',
+      },
+    })).toBeGreaterThan(residentViewAuditCountBefore);
+    expect(residentViewAudit.details).toMatchObject({
+      residentId: seededResidents[1].id,
+      residentName: seededResidents[1].fullName,
+      viewerRole: 'NURSE',
+      medicationContentVisible: true,
+      accessScope: 'active-shift-floor-scope',
+    });
   });
 
   it('creates a personal-care note with subtype and rejects invalid subtype combinations', async () => {
@@ -1674,6 +1806,19 @@ describe('SerceSync workflow slices (e2e)', () => {
     expect(withEvidence.body.incident.evidence).toHaveLength(1);
     expect(withEvidence.body.incident.evidence[0].mediaType).toBe('image/jpeg');
     expect(withEvidence.body.resident.effectivePriority).toBe('RED');
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[5].id}/incidents`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .field('severity', 'RED')
+      .field('category', 'INJURY')
+      .field('title', 'Unsafe upload rejected')
+      .field('details', 'SVG evidence should be rejected for demo safety.')
+      .attach('evidence', Buffer.from('<svg></svg>'), {
+        filename: 'unsafe.svg',
+        contentType: 'image/svg+xml',
+      })
+      .expect(400);
 
     await request(app.getHttpServer())
       .post(`/residents/${outOfScopeResident.id}/incidents`)
@@ -2305,7 +2450,61 @@ describe('SerceSync workflow slices (e2e)', () => {
       .get(`/resident-media/${mediaId}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200)
-      .expect('Content-Type', /image\/jpeg/);
+      .expect('Content-Type', /image\/jpeg/)
+      .expect('Content-Disposition', /attachment;/)
+      .expect('X-Content-Type-Options', 'nosniff');
+  });
+
+  it('rejects care notes with unrealistic future or stale recorded times', async () => {
+    const accessToken = await login('carer@sercesync.local');
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[0].id}/timeline`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        type: 'OBSERVATION',
+        details: 'Attempted future-dated note.',
+        recordedAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[0].id}/timeline`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        type: 'OBSERVATION',
+        details: 'Attempted stale note.',
+        recordedAt: new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString(),
+      })
+      .expect(400);
+  });
+
+  it('rejects incidents with unrealistic future or stale occurred times', async () => {
+    const accessToken = await login('carer@sercesync.local');
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[1].id}/incidents`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        severity: 'AMBER',
+        category: 'OTHER',
+        title: 'Future-dated incident',
+        details: 'This should fail timestamp validation.',
+        occurredAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/residents/${seededResidents[1].id}/incidents`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        severity: 'AMBER',
+        category: 'OTHER',
+        title: 'Stale incident',
+        details: 'This should also fail timestamp validation.',
+        occurredAt: new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString(),
+      })
+      .expect(400);
   });
 
   it('does not allow access to a resident outside the assigned floor scope', async () => {
@@ -2786,6 +2985,48 @@ describe('SerceSync workflow slices (e2e)', () => {
         .expect(400),
     );
     expect(String(invalidMedicationRound.body.message)).toMatch(/uuid/i);
+  });
+
+  it('writes an audit event when a resident medication chart is viewed', async () => {
+    const nurseToken = await login('nurse@sercesync.local');
+    await seedMedicationOrder({
+      residentId: seededResidents[2].id,
+      medicationName: 'Atorvastatin',
+    });
+
+    const medicationViewAuditCountBefore = await prisma.auditEvent.count({
+      where: {
+        kind: 'MEDICATION_RECORD_VIEWED',
+      },
+    });
+
+    await request(app.getHttpServer())
+      .get(`/residents/${seededResidents[2].id}/emar`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .expect(200);
+
+    const medicationViewAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: {
+        kind: 'MEDICATION_RECORD_VIEWED',
+        residentId: seededResidents[2].id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    expect(await prisma.auditEvent.count({
+      where: {
+        kind: 'MEDICATION_RECORD_VIEWED',
+      },
+    })).toBeGreaterThan(medicationViewAuditCountBefore);
+    expect(medicationViewAudit.details).toMatchObject({
+      residentId: seededResidents[2].id,
+      residentName: seededResidents[2].fullName,
+      viewerRole: 'NURSE',
+      chartStatus: 'ACTIVE',
+      accessScope: 'active-shift-floor-scope',
+    });
   });
 
   it('records administered medication, creates resident timeline entries, and exposes medication audit history', async () => {

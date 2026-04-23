@@ -4,6 +4,11 @@ import 'package:provider/provider.dart';
 import 'manager_session_controller.dart';
 import 'manager_theme.dart';
 
+const _enableDemoLoginPrefill = bool.fromEnvironment(
+  'ENABLE_DEMO_LOGIN_PREFILL',
+  defaultValue: false,
+);
+
 class ManagerLoginScreen extends StatefulWidget {
   const ManagerLoginScreen({super.key});
 
@@ -13,9 +18,11 @@ class ManagerLoginScreen extends StatefulWidget {
 
 class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
   final _emailController = TextEditingController(
-    text: 'manager@sercesync.local',
+    text: _enableDemoLoginPrefill ? 'manager@sercesync.local' : '',
   );
-  final _passwordController = TextEditingController(text: 'Password123!');
+  final _passwordController = TextEditingController(
+    text: _enableDemoLoginPrefill ? 'Password123!' : '',
+  );
 
   @override
   void dispose() {

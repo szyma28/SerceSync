@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
 } from 'class-validator';
 
@@ -28,4 +29,8 @@ export class CreateResidentIncidentDto {
   @IsOptional()
   @IsDateString()
   occurredAt?: string;
+
+  @IsOptional()
+  @IsUUID()
+  clientRequestId?: string;
 }

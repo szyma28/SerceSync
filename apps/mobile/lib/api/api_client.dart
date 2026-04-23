@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -12,6 +14,8 @@ import '../models/workspace_models.dart';
 class SerceSyncApiClient {
   SerceSyncApiClient({required this.baseUrl});
 
+  static const Duration _requestTimeout = Duration(seconds: 20);
+
   final String baseUrl;
 
   Uri _uri(String path) {
@@ -21,65 +25,206 @@ class SerceSyncApiClient {
     return Uri.parse('$normalizedBaseUrl$path');
   }
 
+  Map<String, String> _headers({
+    String? accessToken,
+    bool includeJsonContentType = false,
+  }) {
+    return {
+      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+      if (includeJsonContentType) 'Content-Type': 'application/json',
+    };
+  }
+
   String resolveMediaUrl(String downloadPath) {
     return _uri(downloadPath).toString();
+  }
+
+  Future<http.Response> _runRequest(
+    Future<http.Response> Function() request,
+  ) async {
+    try {
+      return await request().timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const ApiException(
+        'Request timed out. Check your connection and try again.',
+        isNetworkError: true,
+      );
+    } on SocketException {
+      throw const ApiException(
+        'No connection available right now.',
+        isNetworkError: true,
+      );
+    } on http.ClientException catch (error) {
+      throw ApiException(
+        error.message.isEmpty
+            ? 'A network error occurred while contacting the server.'
+            : error.message,
+        isNetworkError: true,
+      );
+    }
+  }
+
+  Future<http.Response> _runMultipartRequest(
+    http.MultipartRequest request,
+  ) async {
+    try {
+      final streamedResponse = await request.send().timeout(_requestTimeout);
+      return http.Response.fromStream(streamedResponse);
+    } on TimeoutException {
+      throw const ApiException(
+        'Request timed out. Check your connection and try again.',
+        isNetworkError: true,
+      );
+    } on SocketException {
+      throw const ApiException(
+        'No connection available right now.',
+        isNetworkError: true,
+      );
+    } on http.ClientException catch (error) {
+      throw ApiException(
+        error.message.isEmpty
+            ? 'A network error occurred while contacting the server.'
+            : error.message,
+        isNetworkError: true,
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _getJson(
+    String path, {
+    String? accessToken,
+  }) async {
+    final response = await _runRequest(
+      () => http.get(_uri(path), headers: _headers(accessToken: accessToken)),
+    );
+    return _decodeJson(response);
+  }
+
+  Future<Map<String, dynamic>> _postJson(
+    String path, {
+    String? accessToken,
+    Object? body,
+  }) async {
+    final response = await _runRequest(
+      () => http.post(
+        _uri(path),
+        headers: _headers(
+          accessToken: accessToken,
+          includeJsonContentType: true,
+        ),
+        body: body == null ? null : jsonEncode(body),
+      ),
+    );
+    return _decodeJson(response);
+  }
+
+  Future<Map<String, dynamic>> _patchJson(
+    String path, {
+    String? accessToken,
+    Object? body,
+  }) async {
+    final response = await _runRequest(
+      () => http.patch(
+        _uri(path),
+        headers: _headers(
+          accessToken: accessToken,
+          includeJsonContentType: true,
+        ),
+        body: body == null ? null : jsonEncode(body),
+      ),
+    );
+    return _decodeJson(response);
+  }
+
+  Future<Map<String, dynamic>> _multipartJson(
+    http.MultipartRequest request,
+  ) async {
+    final response = await _runMultipartRequest(request);
+    return _decodeJson(response);
   }
 
   Future<LoginResponse> login({
     required String email,
     required String password,
   }) async {
-    final response = await http.post(
-      _uri('/auth/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
+    final decoded = await _postJson(
+      '/auth/login',
+      body: {'email': email, 'password': password},
     );
 
-    return LoginResponse.fromJson(_decodeJson(response));
+    return LoginResponse.fromJson(decoded);
+  }
+
+  Future<LoginResponse> refreshSession({required String refreshToken}) async {
+    final decoded = await _postJson(
+      '/auth/refresh',
+      body: {'refreshToken': refreshToken},
+    );
+
+    return LoginResponse.fromJson(decoded);
+  }
+
+  Future<void> logout({required String refreshToken}) async {
+    await _postJson('/auth/logout', body: {'refreshToken': refreshToken});
+  }
+
+  Future<Map<String, dynamic>> getCurrentHandoverJson({
+    required String accessToken,
+  }) {
+    return _getJson('/handovers/current', accessToken: accessToken);
   }
 
   Future<HandoverSnapshot> getCurrentHandover({
     required String accessToken,
   }) async {
-    final response = await http.get(
-      _uri('/handovers/current'),
-      headers: {'Authorization': 'Bearer $accessToken'},
+    return HandoverSnapshot.fromJson(
+      await getCurrentHandoverJson(accessToken: accessToken),
     );
-
-    return HandoverSnapshot.fromJson(_decodeJson(response));
   }
 
   Future<HandoverSnapshot> acknowledgeCurrentHandover({
     required String accessToken,
   }) async {
-    final response = await http.post(
-      _uri('/handovers/current/acknowledge'),
-      headers: {'Authorization': 'Bearer $accessToken'},
+    final decoded = await acknowledgeCurrentHandoverJson(
+      accessToken: accessToken,
     );
 
-    return HandoverSnapshot.fromJson(_decodeJson(response));
+    return HandoverSnapshot.fromJson(decoded);
+  }
+
+  Future<Map<String, dynamic>> acknowledgeCurrentHandoverJson({
+    required String accessToken,
+  }) {
+    return _postJson(
+      '/handovers/current/acknowledge',
+      accessToken: accessToken,
+    );
+  }
+
+  Future<Map<String, dynamic>> getCurrentTasksJson({
+    required String accessToken,
+  }) {
+    return _getJson('/tasks/current', accessToken: accessToken);
   }
 
   Future<List<ShiftTask>> getCurrentTasks({required String accessToken}) async {
-    final response = await http.get(
-      _uri('/tasks/current'),
-      headers: {'Authorization': 'Bearer $accessToken'},
-    );
-
-    final decoded = _decodeJson(response);
+    final decoded = await getCurrentTasksJson(accessToken: accessToken);
     final tasks = decoded['tasks'] as List<dynamic>? ?? const [];
     return tasks
         .map((entry) => ShiftTask.fromJson(entry as Map<String, dynamic>))
         .toList();
   }
 
-  Future<ShiftOverview> getShiftOverview({required String accessToken}) async {
-    final response = await http.get(
-      _uri('/shifts/my'),
-      headers: {'Authorization': 'Bearer $accessToken'},
-    );
+  Future<Map<String, dynamic>> getShiftOverviewJson({
+    required String accessToken,
+  }) {
+    return _getJson('/shifts/my', accessToken: accessToken);
+  }
 
-    return ShiftOverview.fromJson(_decodeJson(response));
+  Future<ShiftOverview> getShiftOverview({required String accessToken}) async {
+    return ShiftOverview.fromJson(
+      await getShiftOverviewJson(accessToken: accessToken),
+    );
   }
 
   Future<ShiftTask> completeTask({
@@ -87,16 +232,12 @@ class SerceSyncApiClient {
     required String taskId,
     String? note,
   }) async {
-    final response = await http.post(
-      _uri('/tasks/$taskId/complete'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: note != null ? jsonEncode({'note': note}) : null,
+    final decoded = await _postJson(
+      '/tasks/$taskId/complete',
+      accessToken: accessToken,
+      body: note != null ? {'note': note} : null,
     );
 
-    final decoded = _decodeJson(response);
     return ShiftTask.fromJson(decoded['task'] as Map<String, dynamic>);
   }
 
@@ -105,16 +246,12 @@ class SerceSyncApiClient {
     required String taskId,
     required String reason,
   }) async {
-    final response = await http.post(
-      _uri('/tasks/$taskId/defer'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'reason': reason}),
+    final decoded = await _postJson(
+      '/tasks/$taskId/defer',
+      accessToken: accessToken,
+      body: {'reason': reason},
     );
 
-    final decoded = _decodeJson(response);
     return ShiftTask.fromJson(decoded['task'] as Map<String, dynamic>);
   }
 
@@ -123,28 +260,23 @@ class SerceSyncApiClient {
     required String taskId,
     required String reason,
   }) async {
-    final response = await http.post(
-      _uri('/tasks/$taskId/escalate'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'reason': reason}),
+    final decoded = await _postJson(
+      '/tasks/$taskId/escalate',
+      accessToken: accessToken,
+      body: {'reason': reason},
     );
 
-    final decoded = _decodeJson(response);
     return ShiftTask.fromJson(decoded['task'] as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> getResidentsJson({required String accessToken}) {
+    return _getJson('/residents', accessToken: accessToken);
   }
 
   Future<List<ResidentListItem>> getResidents({
     required String accessToken,
   }) async {
-    final response = await http.get(
-      _uri('/residents'),
-      headers: {'Authorization': 'Bearer $accessToken'},
-    );
-
-    final decoded = _decodeJson(response);
+    final decoded = await getResidentsJson(accessToken: accessToken);
     final residents = decoded['residents'] as List<dynamic>? ?? const [];
     return residents
         .map(
@@ -153,40 +285,44 @@ class SerceSyncApiClient {
         .toList();
   }
 
+  Future<Map<String, dynamic>> getResidentByIdJson({
+    required String accessToken,
+    required String residentId,
+  }) {
+    return _getJson('/residents/$residentId', accessToken: accessToken);
+  }
+
   Future<ResidentDetail> getResidentById({
     required String accessToken,
     required String residentId,
   }) async {
-    final response = await http.get(
-      _uri('/residents/$residentId'),
-      headers: {'Authorization': 'Bearer $accessToken'},
+    return ResidentDetail.fromJson(
+      await getResidentByIdJson(
+        accessToken: accessToken,
+        residentId: residentId,
+      ),
     );
-
-    return ResidentDetail.fromJson(_decodeJson(response));
   }
 
   Future<ResidentEmarProfile> getResidentEmar({
     required String accessToken,
     required String residentId,
   }) async {
-    final response = await http.get(
-      _uri('/residents/$residentId/emar'),
-      headers: {'Authorization': 'Bearer $accessToken'},
+    return ResidentEmarProfile.fromJson(
+      await _getJson('/residents/$residentId/emar', accessToken: accessToken),
     );
-
-    return ResidentEmarProfile.fromJson(_decodeJson(response));
   }
 
   Future<MedicationRoundSnapshot> getMedicationRound({
     required String accessToken,
     required String shiftId,
   }) async {
-    final response = await http.get(
-      _uri('/shifts/$shiftId/medication-round'),
-      headers: {'Authorization': 'Bearer $accessToken'},
+    return MedicationRoundSnapshot.fromJson(
+      await _getJson(
+        '/shifts/$shiftId/medication-round',
+        accessToken: accessToken,
+      ),
     );
-
-    return MedicationRoundSnapshot.fromJson(_decodeJson(response));
   }
 
   Future<MedicationDoseActionResult> administerMedicationDose({
@@ -283,22 +419,19 @@ class SerceSyncApiClient {
     String? notes,
     String? witnessUserId,
   }) async {
-    final response = await http.patch(
-      _uri('/medication-dose-instances/$doseInstanceId/status'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'status': MedicationDoseStatus.held.apiValue,
-        'reason': reason.trim(),
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
-          'witnessUserId': witnessUserId.trim(),
-      }),
+    return MedicationDoseActionResult.fromJson(
+      await _patchJson(
+        '/medication-dose-instances/$doseInstanceId/status',
+        accessToken: accessToken,
+        body: {
+          'status': MedicationDoseStatus.held.apiValue,
+          'reason': reason.trim(),
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+            'witnessUserId': witnessUserId.trim(),
+        },
+      ),
     );
-
-    return MedicationDoseActionResult.fromJson(_decodeJson(response));
   }
 
   Future<PrnEventResult> recordPrnEvent({
@@ -312,27 +445,24 @@ class SerceSyncApiClient {
     String? notes,
     String? witnessUserId,
   }) async {
-    final response = await http.post(
-      _uri('/residents/$residentId/prn-events'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'medicationOrderId': medicationOrderId,
-        'eventType': eventType.apiValue,
-        'reason': reason,
-        if (doseGiven != null && doseGiven.trim().isNotEmpty)
-          'doseGiven': doseGiven.trim(),
-        if (doseUnit != null && doseUnit.trim().isNotEmpty)
-          'doseUnit': doseUnit.trim(),
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
-          'witnessUserId': witnessUserId.trim(),
-      }),
+    return PrnEventResult.fromJson(
+      await _postJson(
+        '/residents/$residentId/prn-events',
+        accessToken: accessToken,
+        body: {
+          'medicationOrderId': medicationOrderId,
+          'eventType': eventType.apiValue,
+          'reason': reason,
+          if (doseGiven != null && doseGiven.trim().isNotEmpty)
+            'doseGiven': doseGiven.trim(),
+          if (doseUnit != null && doseUnit.trim().isNotEmpty)
+            'doseUnit': doseUnit.trim(),
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+            'witnessUserId': witnessUserId.trim(),
+        },
+      ),
     );
-
-    return PrnEventResult.fromJson(_decodeJson(response));
   }
 
   Future<MedicationDoseActionResult> _postDoseOutcome({
@@ -345,38 +475,38 @@ class SerceSyncApiClient {
     String? notes,
     String? witnessUserId,
   }) async {
-    final response = await http.post(
-      _uri('/medication-dose-instances/$doseInstanceId/$actionPath'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
-        if (doseGiven != null && doseGiven.trim().isNotEmpty)
-          'doseGiven': doseGiven.trim(),
-        if (doseUnit != null && doseUnit.trim().isNotEmpty)
-          'doseUnit': doseUnit.trim(),
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-        if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
-          'witnessUserId': witnessUserId.trim(),
-      }),
+    return MedicationDoseActionResult.fromJson(
+      await _postJson(
+        '/medication-dose-instances/$doseInstanceId/$actionPath',
+        accessToken: accessToken,
+        body: {
+          if (reason != null && reason.trim().isNotEmpty)
+            'reason': reason.trim(),
+          if (doseGiven != null && doseGiven.trim().isNotEmpty)
+            'doseGiven': doseGiven.trim(),
+          if (doseUnit != null && doseUnit.trim().isNotEmpty)
+            'doseUnit': doseUnit.trim(),
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          if (witnessUserId != null && witnessUserId.trim().isNotEmpty)
+            'witnessUserId': witnessUserId.trim(),
+        },
+      ),
     );
-
-    return MedicationDoseActionResult.fromJson(_decodeJson(response));
   }
 
   Future<ResidentTimelineEntry> createResidentTimelineEntry({
     required String accessToken,
     required String residentId,
     required ResidentTimelineEntryDraft draft,
+    String? clientRequestId,
+    DateTime? recordedAt,
   }) async {
     if (draft.evidence != null) {
       final request = http.MultipartRequest(
         'POST',
         _uri('/residents/$residentId/timeline'),
       );
-      request.headers['Authorization'] = 'Bearer $accessToken';
+      request.headers.addAll(_headers(accessToken: accessToken));
       request.fields['type'] = draft.type.apiValue;
       request.fields['details'] = draft.details;
       if (draft.personalCareSubtype != null) {
@@ -389,6 +519,12 @@ class SerceSyncApiClient {
       if (draft.mealIntakeAmount != null) {
         request.fields['mealIntakeAmount'] = draft.mealIntakeAmount!.apiValue;
       }
+      if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
+        request.fields['clientRequestId'] = clientRequestId.trim();
+      }
+      if (recordedAt != null) {
+        request.fields['recordedAt'] = recordedAt.toUtc().toIso8601String();
+      }
       request.files.add(
         http.MultipartFile.fromBytes(
           'evidence',
@@ -398,24 +534,24 @@ class SerceSyncApiClient {
         ),
       );
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      final decoded = _decodeJson(response);
+      final decoded = await _multipartJson(request);
       return ResidentTimelineEntry.fromJson(
         decoded['entry'] as Map<String, dynamic>,
       );
     }
 
-    final response = await http.post(
-      _uri('/residents/$residentId/timeline'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
+    final decoded = await _postJson(
+      '/residents/$residentId/timeline',
+      accessToken: accessToken,
+      body: {
+        ...draft.toJson(),
+        if (clientRequestId != null && clientRequestId.trim().isNotEmpty)
+          'clientRequestId': clientRequestId.trim(),
+        if (recordedAt != null)
+          'recordedAt': recordedAt.toUtc().toIso8601String(),
       },
-      body: jsonEncode(draft.toJson()),
     );
 
-    final decoded = _decodeJson(response);
     return ResidentTimelineEntry.fromJson(
       decoded['entry'] as Map<String, dynamic>,
     );
@@ -425,17 +561,25 @@ class SerceSyncApiClient {
     required String accessToken,
     required String residentId,
     required ResidentIncidentDraft draft,
+    String? clientRequestId,
+    DateTime? occurredAt,
   }) async {
     if (draft.evidence != null) {
       final request = http.MultipartRequest(
         'POST',
         _uri('/residents/$residentId/incidents'),
       );
-      request.headers['Authorization'] = 'Bearer $accessToken';
+      request.headers.addAll(_headers(accessToken: accessToken));
       request.fields['severity'] = draft.severity.apiValue;
       request.fields['category'] = draft.category.apiValue;
       request.fields['title'] = draft.title;
       request.fields['details'] = draft.details;
+      if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
+        request.fields['clientRequestId'] = clientRequestId.trim();
+      }
+      if (occurredAt != null) {
+        request.fields['occurredAt'] = occurredAt.toUtc().toIso8601String();
+      }
       request.files.add(
         http.MultipartFile.fromBytes(
           'evidence',
@@ -445,49 +589,77 @@ class SerceSyncApiClient {
         ),
       );
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      final decoded = _decodeJson(response);
+      final decoded = await _multipartJson(request);
       return ResidentIncident.fromJson(
         decoded['incident'] as Map<String, dynamic>,
       );
     }
 
-    final response = await http.post(
-      _uri('/residents/$residentId/incidents'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
+    final decoded = await _postJson(
+      '/residents/$residentId/incidents',
+      accessToken: accessToken,
+      body: {
+        ...draft.toJson(),
+        if (clientRequestId != null && clientRequestId.trim().isNotEmpty)
+          'clientRequestId': clientRequestId.trim(),
+        if (occurredAt != null)
+          'occurredAt': occurredAt.toUtc().toIso8601String(),
       },
-      body: jsonEncode(draft.toJson()),
     );
 
-    final decoded = _decodeJson(response);
     return ResidentIncident.fromJson(
       decoded['incident'] as Map<String, dynamic>,
     );
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) {
-    if (response.body.isEmpty) return <String, dynamic>{};
+    if (response.body.isEmpty) {
+      _checkError(response, const <String, dynamic>{});
+      return <String, dynamic>{};
+    }
+
     final dynamic decoded = jsonDecode(response.body);
     _checkError(response, decoded);
     return decoded as Map<String, dynamic>;
   }
 
   void _checkError(http.Response response, dynamic decoded) {
-    if (response.statusCode >= 400) {
-      if (decoded is Map<String, dynamic>) {
-        final message = decoded['message'];
-        if (message is String) {
-          throw ApiException(message);
-        }
-        if (message is List && message.isNotEmpty) {
-          throw ApiException(message.join(', '));
-        }
-      }
-      throw ApiException('Request failed with status ${response.statusCode}.');
+    if (response.statusCode < 400) {
+      return;
     }
+
+    String? code;
+    if (decoded is Map<String, dynamic>) {
+      final rawCode = decoded['code'];
+      if (rawCode is String && rawCode.trim().isNotEmpty) {
+        code = rawCode.trim();
+      }
+
+      final message = decoded['message'];
+      if (message is String) {
+        throw ApiException(
+          message,
+          statusCode: response.statusCode,
+          code: code,
+          isUnauthorized: response.statusCode == 401,
+        );
+      }
+      if (message is List && message.isNotEmpty) {
+        throw ApiException(
+          message.join(', '),
+          statusCode: response.statusCode,
+          code: code,
+          isUnauthorized: response.statusCode == 401,
+        );
+      }
+    }
+
+    throw ApiException(
+      'Request failed with status ${response.statusCode}.',
+      statusCode: response.statusCode,
+      code: code,
+      isUnauthorized: response.statusCode == 401,
+    );
   }
 
   MediaType? _mediaTypeHeaderValue(String mediaType) {
@@ -501,8 +673,22 @@ class SerceSyncApiClient {
 }
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(
+    this.message, {
+    this.statusCode,
+    this.code,
+    this.isNetworkError = false,
+    this.isUnauthorized = false,
+  });
+
   final String message;
+  final int? statusCode;
+  final String? code;
+  final bool isNetworkError;
+  final bool isUnauthorized;
+
+  bool get isRetryableServerError =>
+      statusCode != null && statusCode! >= 500 && statusCode! < 600;
 
   @override
   String toString() => message;

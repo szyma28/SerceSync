@@ -17,12 +17,14 @@ The repository contains:
 - mandatory handover acknowledgement before shift work begins
 - priorities view for urgent tasks and medication signals
 - resident directory and resident detail workflows
+- offline-capable text-note and incident capture with queued sync
 - nurse-specific medication round tools
 - personal-care, meal-intake, and incident-aware resident context
 
 ### Manager workspace
 
 - manager login and session restore
+- browser-session renewal and recovery after temporary API interruption
 - live dashboard coverage across active floors
 - resident directory with create and edit flows
 - baseline priority and resident profile context management
@@ -141,6 +143,22 @@ pnpm run db:reset-local
 
 This restores the standard baseline for local review and testing.
 
+### 7. Refresh active demo shifts during day-to-day testing
+
+```bash
+pnpm run db:refresh-active-shifts
+```
+
+This keeps the seeded active shifts aligned with the current day and prevents demo tasks from drifting into unrealistic overdue states after the database has been left running for a while.
+
+### 8. Apply schema changes after pulling backend updates
+
+```bash
+pnpm run db:deploy
+```
+
+Run this after pulling backend/auth/schema changes so the local database matches the current code.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -150,8 +168,11 @@ This restores the standard baseline for local review and testing.
 | `API_BASE_URL` | Base URL used by clients to reach the API |
 | `JWT_SECRET` | Secret used for token signing |
 | `JWT_EXPIRES_IN` | Token lifetime |
+| `MANAGER_JWT_EXPIRES_IN` | Longer-lived browser session lifetime for the manager dashboard |
+| `JWT_REFRESH_EXPIRES_IN` | Mobile refresh-session lifetime |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `WEB_APP_URL` | Local Flutter web URL |
+| `WEB_ALLOWED_ORIGINS` | Optional comma-separated additional web origins allowed to use credentialed CORS |
 | `MOBILE_APP_SCHEME` | Reserved mobile app scheme identifier |
 
 Use synthetic data only for development, testing, and demos.
@@ -182,6 +203,14 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000
 ```
 
 If `API_BASE_URL` is omitted, the app defaults to `http://localhost:3000`.
+
+For a closer match to the local demo/browser-session setup, you can also build and serve the web bundle on port `8080`:
+
+```bash
+flutter build web
+cd build/web
+python3 -m http.server 8080
+```
 
 ## Verification
 
@@ -221,4 +250,5 @@ Common local accounts used during development include:
 ## Notes
 
 - Local scripts and seeded data are intended to make review and demos repeatable.
+- The repository uses synthetic data only and is intended for dissertation/demo use, not production deployment.
 - If `pnpm run test:e2e` fails, check that PostgreSQL is running and `DATABASE_URL` is valid before troubleshooting the app itself.

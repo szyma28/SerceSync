@@ -20,6 +20,7 @@ import {
   type ShiftStatus,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
+import { buildCsvDocument } from '../common/csv';
 import { ManagerDashboardStreamService } from '../manager-dashboard-stream/manager-dashboard-stream.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicationAllergyDto } from './dto/create-medication-allergy.dto';
@@ -73,6 +74,7 @@ const mutableDoseStatuses = new Set<MedicationDoseStatus>([
   MedicationDoseStatus.CANCELLED,
 ]);
 const medicationAuditKinds: AuditEventKind[] = [
+  'MEDICATION_RECORD_VIEWED',
   'MEDICATION_CHART_CREATED',
   'MEDICATION_ORDER_CREATED',
   'MEDICATION_ORDER_UPDATED',
@@ -116,6 +118,22 @@ const weekdayLookup = [
   'FRIDAY',
   'SATURDAY',
 ];
+
+type MedicationRecordAccessAuditArgs = {
+  user: AuthenticatedUser;
+  resident: {
+    id: string;
+    fullName: string;
+    roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
+  };
+  shiftId?: string | null;
+  chartStatus: MedicationChartStatus | null;
+  scheduledMedicationCount: number;
+  prnMedicationCount: number;
+  recentEventCount: number;
+};
 
 type MedicationShiftAccess = {
   id: string;
@@ -280,8 +298,6 @@ type MedicationRoundGroup = {
   roundLabel: string;
   items: MedicationDoseInstanceView[];
 };
-
-type CsvCell = string | number | boolean | Date | null | undefined;
 
 type MedicationOrderSnapshotSource = {
   medicationName: string;
@@ -601,8 +617,9 @@ export class MedicationsService {
     });
 
     for (const doseInstance of doseInstances) {
-      const handoverAcknowledgedAt =
-        this.getEarliestHandoverAcknowledgement(doseInstance.shift);
+      const handoverAcknowledgedAt = this.getEarliestHandoverAcknowledgement(
+        doseInstance.shift,
+      );
       const dueWindow =
         doseInstance.medicationOrder.isActive &&
         !doseInstance.medicationOrder.isPRN &&
@@ -923,6 +940,32 @@ export class MedicationsService {
         medicationOrderId: args.medicationOrderId ?? null,
         medicationDoseInstanceId: args.medicationDoseInstanceId ?? null,
         details: args.details,
+      },
+    });
+  }
+
+  private async createMedicationRecordAccessAuditEvent(
+    args: MedicationRecordAccessAuditArgs,
+  ) {
+    await this.prisma.auditEvent.create({
+      data: {
+        kind: 'MEDICATION_RECORD_VIEWED',
+        userId: args.user.userId,
+        shiftId: args.shiftId ?? null,
+        residentId: args.resident.id,
+        details: {
+          residentId: args.resident.id,
+          residentName: args.resident.fullName,
+          roomLabel: args.resident.roomLabel,
+          floorNumber: args.resident.floorNumber,
+          unitLabel: args.resident.unitLabel,
+          viewerRole: args.user.role,
+          chartStatus: args.chartStatus,
+          scheduledMedicationCount: args.scheduledMedicationCount,
+          prnMedicationCount: args.prnMedicationCount,
+          recentEventCount: args.recentEventCount,
+          accessScope: args.shiftId ? 'active-shift-floor-scope' : 'manager',
+        } satisfies Prisma.InputJsonObject,
       },
     });
   }
@@ -1572,7 +1615,26 @@ export class MedicationsService {
       ['NURSE', 'MANAGER'],
       medicationViewerRestrictionReason,
     );
-    return this.buildResidentMedicationProfile(residentId, user);
+    const { shift } = await this.findResidentInScope(residentId, user);
+    const profile = await this.buildResidentMedicationProfile(residentId, user);
+
+    await this.createMedicationRecordAccessAuditEvent({
+      user,
+      resident: {
+        id: profile.resident.id,
+        fullName: profile.resident.fullName,
+        roomLabel: profile.resident.roomLabel,
+        floorNumber: profile.resident.floorNumber,
+        unitLabel: profile.resident.unitLabel,
+      },
+      shiftId: shift?.id,
+      chartStatus: profile.chart?.status ?? null,
+      scheduledMedicationCount: profile.scheduledMedications.length,
+      prnMedicationCount: profile.prnMedications.length,
+      recentEventCount: profile.recentEvents.length,
+    });
+
+    return profile;
   }
 
   async getResidentMedications(residentId: string, user: AuthenticatedUser) {
@@ -2753,7 +2815,10 @@ export class MedicationsService {
         entry.witnessUserId,
       ]),
     );
-    const allergiesByResidentId = new Map<string, MedicationAllergySnapshot[]>();
+    const allergiesByResidentId = new Map<
+      string,
+      MedicationAllergySnapshot[]
+    >();
     for (const allergy of allergies) {
       const current = allergiesByResidentId.get(allergy.residentId) ?? [];
       current.push({
@@ -4020,32 +4085,6 @@ export class MedicationsService {
       recentChanges: exceptions.recentChanges,
     };
   }
-
-  private toCsvCell(value: CsvCell) {
-    if (value == null) {
-      return '';
-    }
-
-    const rendered =
-      value instanceof Date ? value.toISOString() : String(value);
-    if (/[",\n]/.test(rendered)) {
-      return `"${rendered.replace(/"/g, '""')}"`;
-    }
-
-    return rendered;
-  }
-
-  private buildCsv(
-    headers: readonly string[],
-    rows: ReadonlyArray<ReadonlyArray<CsvCell>>,
-  ) {
-    const headerRow = headers.map((header) => this.toCsvCell(header)).join(',');
-    const bodyRows = rows.map((row) =>
-      row.map((cell) => this.toCsvCell(cell)).join(','),
-    );
-    return [headerRow, ...bodyRows].join('\n');
-  }
-
   async exportResidentEmarCsv(residentId: string, user: AuthenticatedUser) {
     const payload = await this.getResidentEmar(residentId, user);
     const rows = [
@@ -4079,7 +4118,7 @@ export class MedicationsService {
       ]),
     ];
 
-    return this.buildCsv(
+    return buildCsvDocument(
       [
         'Resident',
         'MedicationType',
@@ -4180,7 +4219,7 @@ export class MedicationsService {
       ]),
     ];
 
-    return this.buildCsv(
+    return buildCsvDocument(
       [
         'RowType',
         'MedicationTypeOrTrigger',
@@ -4235,7 +4274,7 @@ export class MedicationsService {
       ]),
     );
 
-    return this.buildCsv(
+    return buildCsvDocument(
       [
         'RoundLabel',
         'ResidentName',
@@ -4255,7 +4294,7 @@ export class MedicationsService {
 
   async exportMedicationAuditCsv() {
     const payload = await this.getManagerMedicationAudit();
-    return this.buildCsv(
+    return buildCsvDocument(
       [
         'AuditEventId',
         'Kind',

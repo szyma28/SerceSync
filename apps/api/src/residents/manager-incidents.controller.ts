@@ -6,6 +6,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -22,6 +23,12 @@ export class ManagerIncidentsController {
   constructor(private readonly residentsService: ResidentsService) {}
 
   @Post(':id/acknowledge')
+  @Throttle({
+    default: {
+      limit: 30,
+      ttl: 60_000,
+    },
+  })
   acknowledgeIncident(
     @Param('id', new ParseUUIDPipe({ version: '4' })) incidentId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -35,6 +42,12 @@ export class ManagerIncidentsController {
   }
 
   @Post(':id/resolve')
+  @Throttle({
+    default: {
+      limit: 30,
+      ttl: 60_000,
+    },
+  })
   resolveIncident(
     @Param('id', new ParseUUIDPipe({ version: '4' })) incidentId: string,
     @CurrentUser() user: AuthenticatedUser,

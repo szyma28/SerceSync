@@ -3,15 +3,22 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 
 import '../api/api_client.dart';
+import '../controllers/mobile_session_controller.dart';
 import '../models/handover.dart';
 import '../models/medication_models.dart';
+import '../models/user.dart';
 import '../models/workspace_models.dart';
 import 'medication_round_screen.dart';
 import '../theme/app_theme.dart';
+import '../widgets/data_freshness_indicator.dart';
 import '../widgets/screen_message_state.dart';
+import '../widgets/status_banner.dart';
 import '../widgets/date_time_formatters.dart';
+import '../widgets/loading_skeleton.dart';
+import '../widgets/resume_refresh_mixin.dart';
 
 part 'resident_detail/resident_detail_header.dart';
 part 'resident_detail/resident_detail_tasks.dart';
@@ -25,25 +32,18 @@ class ResidentDetailScreen extends StatefulWidget {
   const ResidentDetailScreen({
     super.key,
     required this.residentId,
-    required this.apiClient,
-    required this.accessToken,
-    required this.currentCarerName,
-    required this.currentUserRole,
     this.highlightTaskId,
   });
 
   final String residentId;
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
-  final String currentCarerName;
-  final AppUserRole currentUserRole;
   final String? highlightTaskId;
 
   @override
   State<ResidentDetailScreen> createState() => _ResidentDetailScreenState();
 }
 
-class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
+class _ResidentDetailScreenState extends State<ResidentDetailScreen>
+    with WidgetsBindingObserver, ResumeRefreshStateMixin {
   final ImagePicker _imagePicker = ImagePicker();
   final GlobalKey _highlightTaskKey = GlobalKey();
   final Map<String, TextEditingController> _completionControllers = {};
@@ -61,13 +61,24 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
   bool _noteSaveConfirmed = false;
   ResidentEmarProfile? _emarProfile;
   HandoverSnapshot? _handoverSnapshot;
+  DateTime? _lastUpdatedAt;
+  bool _showingCachedData = false;
+
+  MobileSessionController get _sessionController =>
+      context.read<MobileSessionController>();
+
+  LoginUser? get _currentUser => _sessionController.user;
+
+  AppUserRole get _currentUserRole => _currentUser?.role ?? AppUserRole.carer;
+
+  SerceSyncApiClient? get _apiClient => _sessionController.apiClient;
 
   bool get _canViewMedicationContent =>
-      widget.currentUserRole == AppUserRole.nurse ||
-      widget.currentUserRole == AppUserRole.manager;
+      _currentUserRole == AppUserRole.nurse ||
+      _currentUserRole == AppUserRole.manager;
 
   bool get _canRecordMedicationAdministration =>
-      widget.currentUserRole == AppUserRole.nurse;
+      _currentUserRole == AppUserRole.nurse;
 
   bool get _handoverAcknowledgedForMedication =>
       _handoverSnapshot?.acknowledged ?? false;
@@ -89,7 +100,23 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     super.dispose();
   }
 
+  @override
+  bool get canTriggerResumeRefresh => _sessionController.hasActiveSession;
+
+  @override
+  bool get hasVisibleContentForResumeRefresh => _resident != null;
+
+  @override
+  Future<void> refreshAfterResume() => _loadResident(showLoading: false);
+
   Future<void> _loadResident({bool showLoading = true}) async {
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    if (session == null) {
+      return;
+    }
+
     if (showLoading) {
       setState(() {
         _isLoading = true;
@@ -98,19 +125,46 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       });
     }
 
-    try {
-      final resident = await widget.apiClient.getResidentById(
-        accessToken: widget.accessToken,
+    final workspaceRepository = _sessionController.workspaceRepository;
+    if (!showLoading || _resident == null) {
+      final cachedResident = await workspaceRepository.readCachedResidentDetail(
+        session: session,
         residentId: widget.residentId,
       );
+      if (cachedResident != null && mounted) {
+        final mergedResident = await _sessionController.residentRepository
+            .mergeQueuedResidentState(
+              session: session,
+              residentDetail: cachedResident.data,
+            );
+        setState(() {
+          _resident = mergedResident;
+          _lastUpdatedAt = cachedResident.fetchedAt;
+          _showingCachedData = true;
+        });
+        _scheduleHighlightedTaskReveal(mergedResident);
+      }
+    }
+
+    try {
+      final refreshedResident = await workspaceRepository.refreshResidentDetail(
+        session: session,
+        residentId: widget.residentId,
+      );
+      final resident = await _sessionController.residentRepository
+          .mergeQueuedResidentState(
+            session: session,
+            residentDetail: refreshedResident.data,
+          );
       ResidentEmarProfile? emarProfile;
       String? emarErrorMessage;
       HandoverSnapshot? handoverSnapshot;
 
-      if (_canViewMedicationContent) {
+      final apiClient = _apiClient;
+      if (_canViewMedicationContent && apiClient != null) {
         try {
-          emarProfile = await widget.apiClient.getResidentEmar(
-            accessToken: widget.accessToken,
+          emarProfile = await apiClient.getResidentEmar(
+            accessToken: session.accessToken,
             residentId: widget.residentId,
           );
         } on ApiException catch (error) {
@@ -118,10 +172,10 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         }
       }
 
-      if (_canRecordMedicationAdministration) {
+      if (_canRecordMedicationAdministration && apiClient != null) {
         try {
-          handoverSnapshot = await widget.apiClient.getCurrentHandover(
-            accessToken: widget.accessToken,
+          handoverSnapshot = await apiClient.getCurrentHandover(
+            accessToken: session.accessToken,
           );
         } on ApiException {
           handoverSnapshot = null;
@@ -135,6 +189,8 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         _emarErrorMessage = emarErrorMessage;
         _handoverSnapshot = handoverSnapshot;
         _errorMessage = null;
+        _lastUpdatedAt = refreshedResident.fetchedAt;
+        _showingCachedData = false;
       });
       _scheduleHighlightedTaskReveal(resident);
     } on ApiException catch (error) {
@@ -220,13 +276,21 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       return;
     }
 
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    final apiClient = _apiClient;
+    if (session == null || apiClient == null) {
+      return;
+    }
+
     final controller = _completionControllerForTask(task.id);
     final note = controller.text.trim();
 
     setState(() => _taskBeingUpdatedId = task.id);
     try {
-      await widget.apiClient.completeTask(
-        accessToken: widget.accessToken,
+      await apiClient.completeTask(
+        accessToken: session.accessToken,
         taskId: task.id,
         note: note.isEmpty ? null : note,
       );
@@ -271,31 +335,67 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     );
   }
 
-  Future<void> _runResidentSave<T>({
-    required T? draft,
-    required Future<void> Function(T draft) persistDraft,
-    required Future<void> Function() onSaved,
-    required String successMessage,
-  }) async {
+  Future<void> _openAddEntrySheet([ResidentEntryType? initialType]) async {
+    final draft = await _showResidentSheet<ResidentTimelineEntryDraft>(
+      (context) => _AddEntrySheet(
+        initialType: initialType,
+        currentUserRole: _currentUserRole,
+        onPickEvidence: _pickEvidence,
+      ),
+    );
+
     if (draft == null) {
+      return;
+    }
+
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    final shiftId =
+        _handoverSnapshot?.shift.id ??
+        _sessionController.handoverSnapshot?.shift.id;
+    if (session == null || shiftId == null) {
       return;
     }
 
     setState(() => _isSaving = true);
     try {
-      await persistDraft(draft);
+      final result = await _sessionController.residentRepository
+          .saveTimelineEntry(
+            session: session,
+            residentId: widget.residentId,
+            shiftId: shiftId,
+            draft: draft,
+          );
       await _loadResident(showLoading: false);
       if (!mounted) return;
-      await onSaved();
+      await HapticFeedback.lightImpact();
+      _showNoteSaveConfirmation();
+      if (result.isPendingSync) {
+        unawaited(
+          _sessionController.triggerOfflineSync(reason: 'resident-note'),
+        );
+      }
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(successMessage)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.isPendingSync
+                ? 'Note saved offline. It will sync automatically.'
+                : result.needsReview
+                ? 'Note saved locally, but it needs review before it can sync.'
+                : 'Note saved.',
+          ),
+        ),
+      );
     } on ApiException catch (error) {
       if (!mounted) return;
+      final message = draft.evidence != null && error.isNetworkError
+          ? 'Evidence attachments require an internet connection. Try again when you are back online.'
+          : error.message;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -303,47 +403,66 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     }
   }
 
-  Future<void> _openAddEntrySheet([ResidentEntryType? initialType]) async {
-    final draft = await _showResidentSheet<ResidentTimelineEntryDraft>(
-      (context) => _AddEntrySheet(
-        initialType: initialType,
-        currentUserRole: widget.currentUserRole,
-        onPickEvidence: _pickEvidence,
-      ),
-    );
-
-    await _runResidentSave(
-      draft: draft,
-      persistDraft: (residentDraft) =>
-          widget.apiClient.createResidentTimelineEntry(
-            accessToken: widget.accessToken,
-            residentId: widget.residentId,
-            draft: residentDraft,
-          ),
-      onSaved: () async {
-        await HapticFeedback.lightImpact();
-        if (!mounted) return;
-        _showNoteSaveConfirmation();
-      },
-      successMessage: 'Note saved.',
-    );
-  }
-
   Future<void> _openReportIncidentSheet() async {
     final draft = await _showResidentSheet<ResidentIncidentDraft>(
       (context) => _ReportIncidentSheet(onPickEvidence: _pickEvidence),
     );
 
-    await _runResidentSave(
-      draft: draft,
-      persistDraft: (incidentDraft) => widget.apiClient.createResidentIncident(
-        accessToken: widget.accessToken,
-        residentId: widget.residentId,
-        draft: incidentDraft,
-      ),
-      onSaved: () => HapticFeedback.heavyImpact(),
-      successMessage: 'Incident reported.',
+    if (draft == null) {
+      return;
+    }
+
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
     );
+    final shiftId =
+        _handoverSnapshot?.shift.id ??
+        _sessionController.handoverSnapshot?.shift.id;
+    if (session == null || shiftId == null) {
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final result = await _sessionController.residentRepository.saveIncident(
+        session: session,
+        residentId: widget.residentId,
+        shiftId: shiftId,
+        draft: draft,
+      );
+      await _loadResident(showLoading: false);
+      if (!mounted) return;
+      await HapticFeedback.heavyImpact();
+      if (result.isPendingSync) {
+        unawaited(
+          _sessionController.triggerOfflineSync(reason: 'resident-incident'),
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.isPendingSync
+                ? 'Incident saved offline. It will sync automatically.'
+                : result.needsReview
+                ? 'Incident saved locally, but it needs review before it can sync.'
+                : 'Incident reported.',
+          ),
+        ),
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      final message = draft.evidence != null && error.isNetworkError
+          ? 'Evidence attachments require an internet connection. Try again when you are back online.'
+          : error.message;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
   }
 
   void _showNoteSaveConfirmation() {
@@ -386,13 +505,20 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     ResidentEmarProfile emarProfile,
   ) async {
     final handoverSnapshot = _handoverSnapshot;
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    final apiClient = _apiClient;
     if (handoverSnapshot == null) {
+      return const [];
+    }
+    if (session == null || apiClient == null) {
       return const [];
     }
 
     try {
-      final round = await widget.apiClient.getMedicationRound(
-        accessToken: widget.accessToken,
+      final round = await apiClient.getMedicationRound(
+        accessToken: session.accessToken,
         shiftId: handoverSnapshot.shift.id,
       );
       return round.witnessCandidates;
@@ -472,10 +598,18 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
       return;
     }
 
+    final session = await _sessionController.resolveSession(
+      refreshIfNeeded: true,
+    );
+    final apiClient = _apiClient;
+    if (session == null || apiClient == null) {
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
-      final result = await widget.apiClient.recordPrnEvent(
-        accessToken: widget.accessToken,
+      final result = await apiClient.recordPrnEvent(
+        accessToken: session.accessToken,
         residentId: widget.residentId,
         medicationOrderId: draft.medicationOrderId,
         eventType: draft.eventType,
@@ -523,6 +657,8 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
 
   Future<void> _openMedicationRound() async {
     final handoverSnapshot = _handoverSnapshot;
+    final apiClient = _apiClient;
+    final accessToken = _sessionController.accessToken;
     if (handoverSnapshot == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -531,6 +667,9 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
           ),
         ),
       );
+      return;
+    }
+    if (apiClient == null || accessToken == null) {
       return;
     }
 
@@ -548,13 +687,29 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MedicationRoundScreen(
-          apiClient: widget.apiClient,
-          accessToken: widget.accessToken,
+          apiClient: apiClient,
+          accessToken: accessToken,
           shiftId: handoverSnapshot.shift.id,
         ),
       ),
     );
 
+    if (!mounted) return;
+    await _loadResident(showLoading: false);
+  }
+
+  Future<void> _retryQueuedMutation(String localMutationId) async {
+    await _sessionController.syncService.retryFailedMutations(
+      localId: localMutationId,
+    );
+    if (!mounted) return;
+    await _loadResident(showLoading: false);
+  }
+
+  Future<void> _discardQueuedMutation(String localMutationId) async {
+    await _sessionController.residentRepository.discardQueuedMutation(
+      localMutationId,
+    );
     if (!mounted) return;
     await _loadResident(showLoading: false);
   }
@@ -566,9 +721,7 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
         decoration: AppTheme.atmosphericBackground,
         child: const Scaffold(
           backgroundColor: Colors.transparent,
-          body: Center(
-            child: CircularProgressIndicator(color: AppTheme.primaryBlue),
-          ),
+          body: SafeArea(child: _ResidentDetailLoadingSkeleton()),
         ),
       );
     }
@@ -618,14 +771,53 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
               children: [
+                if (_showingCachedData || _errorMessage != null)
+                  StatusBanner(
+                    icon: _errorMessage == null
+                        ? Icons.cloud_off_outlined
+                        : Icons.wifi_tethering_error_rounded,
+                    title: _errorMessage == null
+                        ? 'Showing cached resident detail'
+                        : 'Using cached resident detail',
+                    message:
+                        _errorMessage ??
+                        'This record will refresh when the connection comes back.',
+                    lastUpdatedAt: _lastUpdatedAt,
+                    actionLabel: 'Retry',
+                    onAction: _isLoading ? null : _loadResident,
+                  ),
+                if (!_showingCachedData &&
+                    _errorMessage == null &&
+                    _lastUpdatedAt != null)
+                  DataFreshnessIndicator(
+                    lastUpdatedAt: _lastUpdatedAt,
+                    isRefreshing: _isLoading,
+                    label: 'Resident view is live',
+                  ),
                 _ResidentHeader(resident: resident),
                 const SizedBox(height: 16),
-                if (resident.activeIncidents.isNotEmpty) ...[
-                  _ActiveIncidentSummaryCard(
-                    incidents: resident.activeIncidents,
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: resident.activeIncidents.isEmpty
+                      ? const SizedBox.shrink(
+                          key: ValueKey('incident-summary-empty'),
+                        )
+                      : Column(
+                          key: ValueKey(
+                            'incident-summary-${resident.activeIncidents.length}',
+                          ),
+                          children: [
+                            _ActiveIncidentSummaryCard(
+                              incidents: resident.activeIncidents,
+                              onRetry: (localMutationId) =>
+                                  _retryQueuedMutation(localMutationId),
+                              onDiscard: (localMutationId) =>
+                                  _discardQueuedMutation(localMutationId),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
+                ),
                 _TodaySummaryCard(
                   resident: resident,
                   tasks: visibleCurrentTasks,
@@ -681,8 +873,15 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
                   ...resident.timeline.map(
                     (entry) => _TimelineCard(
                       entry: entry,
-                      apiClient: widget.apiClient,
-                      accessToken: widget.accessToken,
+                      apiClient: _apiClient,
+                      accessToken: _sessionController.accessToken,
+                      onRetry: entry.localMutationId == null
+                          ? null
+                          : () => _retryQueuedMutation(entry.localMutationId!),
+                      onDiscard: entry.localMutationId == null
+                          ? null
+                          : () =>
+                                _discardQueuedMutation(entry.localMutationId!),
                     ),
                   ),
               ],
@@ -690,6 +889,71 @@ class _ResidentDetailScreenState extends State<ResidentDetailScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ResidentDetailLoadingSkeleton extends StatelessWidget {
+  const _ResidentDetailLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+      children: const [
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonBlock(height: 88, width: 88, radius: 22),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBlock(height: 20, width: 180, radius: 12),
+                        SizedBox(height: 12),
+                        SkeletonBlock(height: 34, width: 90, radius: 16),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 18),
+              SkeletonBlock(height: 130, width: double.infinity, radius: 20),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 18, width: 160, radius: 12),
+              SizedBox(height: 12),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 8),
+              SkeletonBlock(height: 14, width: 240, radius: 10),
+              SizedBox(height: 16),
+              SkeletonBlock(height: 64, width: double.infinity, radius: 18),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 18, width: 140, radius: 12),
+              SizedBox(height: 12),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 8),
+              SkeletonBlock(height: 14, width: 220, radius: 10),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
