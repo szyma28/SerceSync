@@ -5,11 +5,15 @@ class _TimelineCard extends StatelessWidget {
     required this.entry,
     required this.apiClient,
     required this.accessToken,
+    this.onRetry,
+    this.onDiscard,
   });
 
   final ResidentTimelineEntry entry;
-  final SerceSyncApiClient apiClient;
-  final String accessToken;
+  final SerceSyncApiClient? apiClient;
+  final String? accessToken;
+  final VoidCallback? onRetry;
+  final VoidCallback? onDiscard;
 
   IconData get _icon {
     switch (entry.type) {
@@ -105,6 +109,39 @@ class _TimelineCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (entry.syncStatus != OfflineSyncStatus.synced) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _OfflineSyncBadge(status: entry.syncStatus),
+                      if (entry.syncStatus == OfflineSyncStatus.failed &&
+                          onRetry != null)
+                        TextButton(
+                          onPressed: onRetry,
+                          child: const Text('Retry'),
+                        ),
+                      if (onDiscard != null)
+                        TextButton(
+                          onPressed: onDiscard,
+                          child: const Text('Discard'),
+                        ),
+                    ],
+                  ),
+                  if (entry.syncMessage != null &&
+                      entry.syncMessage!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entry.syncMessage!,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
                 if (metadataPills.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Wrap(spacing: 8, runSpacing: 8, children: metadataPills),
@@ -125,7 +162,9 @@ class _TimelineCard extends StatelessWidget {
                     color: AppTheme.primaryBlueDark,
                   ),
                 ),
-                if (entry.media.isNotEmpty) ...[
+                if (entry.media.isNotEmpty &&
+                    apiClient != null &&
+                    accessToken != null) ...[
                   const SizedBox(height: 12),
                   Text(
                     '${entry.media.length} attachment${entry.media.length == 1 ? '' : 's'}',
@@ -149,7 +188,7 @@ class _TimelineCard extends StatelessWidget {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(14),
                             child: Image.network(
-                              apiClient.resolveMediaUrl(media.downloadPath),
+                              apiClient!.resolveMediaUrl(media.downloadPath),
                               headers: {'Authorization': 'Bearer $accessToken'},
                               fit: BoxFit.cover,
                               height: 160,
@@ -182,7 +221,68 @@ class _TimelineCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (entry.media.isNotEmpty &&
+                    (apiClient == null || accessToken == null)) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Attachments will be available when the session reconnects.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OfflineSyncBadge extends StatelessWidget {
+  const _OfflineSyncBadge({required this.status});
+
+  final OfflineSyncStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = switch (status) {
+      OfflineSyncStatus.pending => AppTheme.primaryBlueDark,
+      OfflineSyncStatus.failed => const Color(0xFF9A6700),
+      OfflineSyncStatus.conflict => AppTheme.errorRed,
+      OfflineSyncStatus.synced => AppTheme.primaryBlueDark,
+    };
+    final background = switch (status) {
+      OfflineSyncStatus.pending => AppTheme.primaryBlueLight,
+      OfflineSyncStatus.failed => AppTheme.warningYellow.withAlpha(28),
+      OfflineSyncStatus.conflict => AppTheme.errorRed.withAlpha(12),
+      OfflineSyncStatus.synced => AppTheme.primaryBlueLight,
+    };
+    final icon = switch (status) {
+      OfflineSyncStatus.pending => Icons.schedule_rounded,
+      OfflineSyncStatus.failed => Icons.sync_problem_rounded,
+      OfflineSyncStatus.conflict => Icons.report_problem_outlined,
+      OfflineSyncStatus.synced => Icons.check_circle_outline,
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 6),
+          Text(
+            status.label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],

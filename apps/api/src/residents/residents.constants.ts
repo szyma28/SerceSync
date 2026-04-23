@@ -1,3 +1,4 @@
+import { extname } from 'path';
 import { Prisma } from '@prisma/client';
 import type {
   IncidentStatus,
@@ -11,6 +12,21 @@ export const activeIncidentStatuses: IncidentStatus[] = [
   'OPEN',
   'ACKNOWLEDGED',
 ];
+
+export const residentEvidenceMaxUploadBytes = 4 * 1024 * 1024;
+
+const allowedResidentEvidenceMimeTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+const allowedResidentEvidenceExtensions = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+]);
 
 const entryTypeLabels: Record<ResidentTimelineEntryType, string> = {
   CARE_GIVEN: 'Care Given',
@@ -85,6 +101,19 @@ export const incidentInclude = {
     },
   },
 } satisfies Prisma.IncidentInclude;
+
+export function isSafeResidentEvidenceUpload(file: {
+  mimetype: string;
+  originalname: string;
+}) {
+  const normalizedMimeType = file.mimetype.trim().toLowerCase();
+  const normalizedExtension = extname(file.originalname).trim().toLowerCase();
+
+  return (
+    allowedResidentEvidenceMimeTypes.has(normalizedMimeType) &&
+    allowedResidentEvidenceExtensions.has(normalizedExtension)
+  );
+}
 
 export function buildEntryTitle(
   type: ResidentTimelineEntryType,

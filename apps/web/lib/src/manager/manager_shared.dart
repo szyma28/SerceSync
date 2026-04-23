@@ -12,11 +12,17 @@ class WorkspaceHeader extends StatelessWidget {
     required this.title,
     required this.trailingLabel,
     required this.onRefresh,
+    this.statusLabel,
+    this.statusIcon = Icons.schedule_rounded,
+    this.isRefreshing = false,
   });
 
   final String title;
   final String trailingLabel;
   final Future<void> Function() onRefresh;
+  final String? statusLabel;
+  final IconData statusIcon;
+  final bool isRefreshing;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +43,46 @@ class WorkspaceHeader extends StatelessWidget {
               ),
             ),
           ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: statusLabel == null
+                ? const SizedBox.shrink(key: ValueKey('workspace-header-no-status'))
+                : Container(
+                    key: ValueKey(statusLabel),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: managerPrimarySoft,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: managerBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isRefreshing)
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          Icon(statusIcon, size: 14, color: managerPrimary),
+                        const SizedBox(width: 8),
+                        Text(
+                          statusLabel!,
+                          style: const TextStyle(
+                            color: managerPrimary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
           IconButton(
             onPressed: onRefresh,
             style: IconButton.styleFrom(
@@ -58,6 +104,38 @@ class WorkspaceHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+void showManagerNotice(
+  BuildContext context, {
+  required String message,
+  bool isError = false,
+}) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      backgroundColor: isError ? managerCritical : null,
+      content: Text(message),
+    ),
+  );
+}
+
+String formatManagerFreshnessLabel(
+  DateTime? lastUpdatedAt, {
+  required bool isRefreshing,
+  bool isLive = false,
+}) {
+  if (isRefreshing) {
+    return isLive ? 'Refreshing live view' : 'Refreshing';
+  }
+
+  if (lastUpdatedAt == null) {
+    return isLive ? 'Live view' : 'Waiting for data';
+  }
+
+  final prefix = isLive ? 'Live' : 'Updated';
+  return '$prefix ${formatTimeOfDay(lastUpdatedAt)}';
 }
 
 class ComingSoonPanel extends StatelessWidget {
@@ -353,6 +431,58 @@ class ResidentPhotoAvatar extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+class ManagerSkeletonBlock extends StatelessWidget {
+  const ManagerSkeletonBlock({
+    super.key,
+    required this.height,
+    this.width,
+    this.radius = 12,
+  });
+
+  final double height;
+  final double? width;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: managerPrimarySoft,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
+}
+
+class ManagerSkeletonCard extends StatelessWidget {
+  const ManagerSkeletonCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(18),
+    this.margin = const EdgeInsets.only(bottom: 16),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry margin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: margin,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: managerPanel,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: managerBorder),
+      ),
+      child: child,
     );
   }
 }

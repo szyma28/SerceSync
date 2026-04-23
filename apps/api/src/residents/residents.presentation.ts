@@ -74,6 +74,7 @@ type TimelineEntryInput = {
   mealIntakeAmount: MealIntakeAmount | null;
   title: string;
   details: string;
+  recordedAt: Date;
   createdAt: Date;
   createdBy: {
     displayName: string;
@@ -141,6 +142,7 @@ type TimelineActivityFeedInput = {
   type: ResidentTimelineEntryType;
   title: string;
   details: string;
+  recordedAt: Date;
   createdAt: Date;
   createdBy: {
     displayName: string;
@@ -185,6 +187,48 @@ type IncidentActivityFeedInput = {
     unitLabel: string;
   };
 };
+
+type ManagerDashboardShiftInput = {
+  id: string;
+  startsAt: Date;
+  endsAt: Date;
+  assignedUsers: Array<{ id: string }>;
+  handover: {
+    acknowledgements: Array<{ acknowledgedById: string }>;
+  } | null;
+};
+
+type ManagerDashboardTaskInput = TaskExceptionFeedInput & {
+  focus: TaskFocus;
+  dashboardStatus: TaskStatus;
+};
+
+type RankedManagerExceptionFeedItem = {
+  kind: string;
+  id: string;
+  shiftId: string;
+  title: string;
+  residentName: string;
+  roomLabel: string;
+  floorNumber: number;
+  unitLabel: string;
+  description: string;
+  status: string | null;
+  severity: IncidentSeverity | null;
+  badge: string;
+  badgeTone: string;
+  canAcknowledge: boolean;
+  canResolve: boolean;
+  occurredAt: Date | null;
+  dueAt: Date | null;
+  rank: number;
+};
+
+function stripRank<T extends { rank: number }>(item: T): Omit<T, 'rank'> {
+  const { rank, ...rest } = item;
+  void rank;
+  return rest;
+}
 
 function resolveManagerFeedLocation(
   resident:
@@ -344,7 +388,7 @@ export function mapTimelineEntry(entry: TimelineEntryInput) {
     title: entry.title,
     details: entry.details,
     authorName: entry.createdBy?.displayName ?? 'System note',
-    timestamp: entry.createdAt,
+    timestamp: entry.recordedAt,
     media: entry.media.map(mapTimelineMedia),
   };
 }
@@ -489,6 +533,106 @@ export function buildManagerComplianceSeries({
     timestamp: new Date(shiftStartsAt.getTime() + shiftDurationMs * offset),
     value: values[index],
   }));
+}
+
+export function buildManagerDashboardMetrics({
+  activeShifts,
+  normalizedTasks,
+  activeIncidentCount,
+}: {
+  activeShifts: ManagerDashboardShiftInput[];
+  normalizedTasks: ManagerDashboardTaskInput[];
+  activeIncidentCount: number;
+}) {
+  const overdueTasks = normalizedTasks.filter(
+    (task) => task.dashboardStatus === 'OVERDUE',
+  ).length;
+  const escalatedItems = normalizedTasks.filter(
+    (task) => task.dashboardStatus === 'ESCALATED',
+  ).length;
+  const unreadHandovers = activeShifts.reduce((total, activeShift) => {
+    const assignedUserIds = new Set(
+      activeShift.assignedUsers.map((user) => user.id),
+    );
+    const acknowledgedUserIds = new Set(
+      activeShift.handover?.acknowledgements.map(
+        (item) => item.acknowledgedById,
+      ) ?? [],
+    );
+
+    return total + Math.max(assignedUserIds.size - acknowledgedUserIds.size, 0);
+  }, 0);
+
+  const shiftElapsedRatio =
+    activeShifts.length == 0
+      ? 0
+      : activeShifts.reduce((total, activeShift) => {
+          return (
+            total +
+            (Date.now() - activeShift.startsAt.getTime()) /
+              Math.max(
+                activeShift.endsAt.getTime() - activeShift.startsAt.getTime(),
+                1,
+              )
+          );
+        }, 0) / activeShifts.length;
+
+  return {
+    overdueTasks,
+    escalatedItems,
+    unreadHandovers,
+    shiftCompletionPercent: clampNumber(
+      Math.round(shiftElapsedRatio * 100),
+      0,
+      100,
+    ),
+    activeIncidents: activeIncidentCount,
+  };
+}
+
+export function buildManagerDashboardExceptionFeed({
+  incidents,
+  medicationExceptionFeed,
+  normalizedTasks,
+  shiftById,
+}: {
+  incidents: IncidentExceptionFeedInput[];
+  medicationExceptionFeed: RankedManagerExceptionFeedItem[];
+  normalizedTasks: ManagerDashboardTaskInput[];
+  shiftById: Map<string, { id: string; floorNumber: number; unitLabel: string }>;
+}) {
+  return [
+    ...incidents.map((incident) => mapIncidentExceptionFeedItem(incident)),
+    ...medicationExceptionFeed,
+    ...normalizedTasks
+      .filter((task) => task.focus !== 'MEDICATION')
+      .map((task) => {
+        const shiftScope = shiftById.get(task.shiftId);
+        if (!shiftScope) {
+          return null;
+        }
+
+        return mapTaskExceptionFeedItem(task, shiftScope);
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null),
+  ]
+    .sort((left, right) => {
+      if (left.rank != right.rank) {
+        return left.rank - right.rank;
+      }
+
+      if (left.kind === 'INCIDENT' && right.kind === 'INCIDENT') {
+        const leftOccurredAt = left.occurredAt?.getTime() ?? 0;
+        const rightOccurredAt = right.occurredAt?.getTime() ?? 0;
+        return rightOccurredAt - leftOccurredAt;
+      }
+
+      const leftDueAt = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightDueAt = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return leftDueAt - rightDueAt;
+    })
+    .slice(0, 5)
+    .map((item) => stripRank(item));
 }
 
 export function mapIncidentExceptionFeedItem(
@@ -639,7 +783,7 @@ export function mapTimelineActivityFeedItem(entry: TimelineActivityFeedInput) {
     unitLabel: location.unitLabel,
     description: entry.details,
     actorName: entry.createdBy?.displayName ?? 'System note',
-    occurredAt: entry.createdAt,
+    occurredAt: entry.recordedAt,
     badge: buildTimelineActivityBadge(entry.type),
     badgeTone: 'info',
   };

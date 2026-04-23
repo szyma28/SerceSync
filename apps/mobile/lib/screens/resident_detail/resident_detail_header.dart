@@ -203,9 +203,15 @@ class _ResidentActionDock extends StatelessWidget {
 }
 
 class _ActiveIncidentSummaryCard extends StatelessWidget {
-  const _ActiveIncidentSummaryCard({required this.incidents});
+  const _ActiveIncidentSummaryCard({
+    required this.incidents,
+    required this.onRetry,
+    required this.onDiscard,
+  });
 
   final List<ResidentIncident> incidents;
+  final ValueChanged<String> onRetry;
+  final ValueChanged<String> onDiscard;
 
   @override
   Widget build(BuildContext context) {
@@ -232,7 +238,7 @@ class _ActiveIncidentSummaryCard extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Active incident summary',
+                  'Incident follow-up',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
@@ -255,7 +261,7 @@ class _ActiveIncidentSummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'These incidents are currently driving the live priority signal for this resident.',
+            'These incidents are still active and may need follow-up checks this shift.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
@@ -264,7 +270,11 @@ class _ActiveIncidentSummaryCard extends StatelessWidget {
           ...incidents.map(
             (incident) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: _IncidentSummaryRow(incident: incident),
+              child: _IncidentSummaryRow(
+                incident: incident,
+                onRetry: onRetry,
+                onDiscard: onDiscard,
+              ),
             ),
           ),
         ],
@@ -274,9 +284,15 @@ class _ActiveIncidentSummaryCard extends StatelessWidget {
 }
 
 class _IncidentSummaryRow extends StatelessWidget {
-  const _IncidentSummaryRow({required this.incident});
+  const _IncidentSummaryRow({
+    required this.incident,
+    required this.onRetry,
+    required this.onDiscard,
+  });
 
   final ResidentIncident incident;
+  final ValueChanged<String> onRetry;
+  final ValueChanged<String> onDiscard;
 
   @override
   Widget build(BuildContext context) {
@@ -342,6 +358,20 @@ class _IncidentSummaryRow extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (incident.syncStatus != OfflineSyncStatus.synced)
+                _OfflineSyncBadge(status: incident.syncStatus),
+              if (incident.syncStatus == OfflineSyncStatus.failed &&
+                  incident.localMutationId != null)
+                TextButton(
+                  onPressed: () => onRetry(incident.localMutationId!),
+                  child: const Text('Retry'),
+                ),
+              if (incident.syncStatus != OfflineSyncStatus.synced &&
+                  incident.localMutationId != null)
+                TextButton(
+                  onPressed: () => onDiscard(incident.localMutationId!),
+                  child: const Text('Discard'),
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -367,6 +397,17 @@ class _IncidentSummaryRow extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+          if (incident.syncMessage != null &&
+              incident.syncMessage!.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              incident.syncMessage!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           if (incident.evidence.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(

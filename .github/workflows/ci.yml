@@ -90,7 +90,7 @@ jobs:
       APP_ENV: test
       API_PORT: 3000
       API_BASE_URL: http://localhost:3000
-      JWT_SECRET: test-secret
+      JWT_SECRET: test-secret-for-ci-only-32-chars
       JWT_EXPIRES_IN: 15m
       WEB_APP_URL: http://localhost:8080
       MOBILE_APP_SCHEME: sercesync

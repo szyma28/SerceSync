@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -10,12 +11,40 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthenticatedUser } from '../common/authenticated-user.interface';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import {
+  isSafeResidentEvidenceUpload,
+  residentEvidenceMaxUploadBytes,
+} from './residents.constants';
 import { CreateResidentIncidentDto } from './dto/create-resident-incident.dto';
 import { CreateResidentTimelineEntryDto } from './dto/create-resident-timeline-entry.dto';
 import { ResidentsService } from './residents.service';
+
+const residentEvidenceUploadOptions = {
+  limits: {
+    fileSize: residentEvidenceMaxUploadBytes,
+  },
+  fileFilter: (
+    _request: unknown,
+    file: { mimetype: string; originalname: string },
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    if (!isSafeResidentEvidenceUpload(file)) {
+      callback(
+        new BadRequestException(
+          'Evidence uploads must be PNG, JPEG, or WebP images.',
+        ),
+        false,
+      );
+      return;
+    }
+
+    callback(null, true);
+  },
+} as const;
 
 @Controller('residents')
 @UseGuards(JwtAuthGuard)
@@ -36,13 +65,13 @@ export class ResidentsController {
   }
 
   @Post(':id/timeline')
-  @UseInterceptors(
-    FileInterceptor('evidence', {
-      limits: {
-        fileSize: 6 * 1024 * 1024,
-      },
-    }),
-  )
+  @Throttle({
+    default: {
+      limit: 20,
+      ttl: 300_000,
+    },
+  })
+  @UseInterceptors(FileInterceptor('evidence', residentEvidenceUploadOptions))
   createResidentTimelineEntry(
     @Param('id', new ParseUUIDPipe({ version: '4' })) residentId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -64,13 +93,13 @@ export class ResidentsController {
   }
 
   @Post(':id/incidents')
-  @UseInterceptors(
-    FileInterceptor('evidence', {
-      limits: {
-        fileSize: 6 * 1024 * 1024,
-      },
-    }),
-  )
+  @Throttle({
+    default: {
+      limit: 20,
+      ttl: 300_000,
+    },
+  })
+  @UseInterceptors(FileInterceptor('evidence', residentEvidenceUploadOptions))
   createResidentIncident(
     @Param('id', new ParseUUIDPipe({ version: '4' })) residentId: string,
     @CurrentUser() user: AuthenticatedUser,

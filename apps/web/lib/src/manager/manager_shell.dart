@@ -6,7 +6,9 @@ import 'package:provider/provider.dart';
 import 'manager_api_client.dart';
 import 'manager_file_download_api.dart';
 import 'manager_login.dart';
+import 'manager_shared.dart';
 import 'manager_session_controller.dart';
+import 'manager_theme.dart';
 import 'manager_workspace.dart';
 
 class ManagerShell extends StatelessWidget {
@@ -47,9 +49,7 @@ class _ManagerShellView extends StatelessWidget {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(errorMessage)),
-    );
+    showManagerNotice(context, message: errorMessage, isError: true);
   }
 
   @override
@@ -57,12 +57,26 @@ class _ManagerShellView extends StatelessWidget {
     final sessionController = context.watch<ManagerSessionController>();
 
     if (sessionController.isRestoringSession) {
-      return const Scaffold(
+      return Scaffold(
+        backgroundColor: managerCanvas,
         body: Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.8),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: ManagerSkeletonCard(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  ManagerSkeletonBlock(height: 20, width: 180),
+                  SizedBox(height: 14),
+                  ManagerSkeletonBlock(height: 14, width: double.infinity),
+                  SizedBox(height: 8),
+                  ManagerSkeletonBlock(height: 14, width: 260),
+                  SizedBox(height: 22),
+                  ManagerSkeletonBlock(height: 48, width: double.infinity, radius: 16),
+                ],
+              ),
+            ),
           ),
         ),
       );

@@ -12,9 +12,16 @@ import { AuthService } from './auth.service';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const expiresIn = configService.get<string>('JWT_EXPIRES_IN') ?? '15m';
+        const jwtSecret = configService.get<string>('JWT_SECRET');
+
+        if (!jwtSecret) {
+          throw new Error(
+            'JWT_SECRET must be configured before the AuthModule initializes.',
+          );
+        }
 
         return {
-          secret: configService.get<string>('JWT_SECRET') ?? 'change-me',
+          secret: jwtSecret,
           signOptions: {
             expiresIn: expiresIn as never,
           },

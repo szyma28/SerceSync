@@ -5,11 +5,13 @@ import {
   ResidentTimelineEntryType,
 } from '@prisma/client';
 import {
+  IsDateString,
   ValidateIf,
   IsEnum,
   IsOptional,
   IsString,
   MaxLength,
+  IsUUID,
 } from 'class-validator';
 
 export class CreateResidentTimelineEntryDto {
@@ -25,6 +27,14 @@ export class CreateResidentTimelineEntryDto {
   @IsOptional()
   @MaxLength(2000)
   details?: string;
+
+  @IsUUID()
+  @IsOptional()
+  clientRequestId?: string;
+
+  @IsDateString()
+  @IsOptional()
+  recordedAt?: string;
 
   @ValidateIf(
     (value: CreateResidentTimelineEntryDto) =>

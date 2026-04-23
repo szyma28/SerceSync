@@ -9,6 +9,7 @@ import 'manager_file_download_api.dart';
 import 'manager_models.dart';
 import 'manager_reporting.dart';
 import 'manager_residents.dart';
+import 'manager_session_controller.dart';
 import 'manager_shared.dart';
 import 'manager_sidebar.dart';
 import 'manager_theme.dart';
@@ -32,8 +33,10 @@ class ManagerWorkspaceScreen extends StatefulWidget {
   State<ManagerWorkspaceScreen> createState() => _ManagerWorkspaceScreenState();
 }
 
-class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
+class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen>
+    with WidgetsBindingObserver {
   late final ManagerWorkspaceController _workspaceController;
+  DateTime? _lastResumeRefreshAt;
 
   final _fullNameController = TextEditingController();
   final _roomNumberController = TextEditingController();
@@ -51,15 +54,19 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _workspaceController = ManagerWorkspaceController(
       apiClient: widget.apiClient,
       session: widget.session,
+      renewSessionSilently: () =>
+          context.read<ManagerSessionController>().renewSessionSilently(),
     )..initialize();
     _seedBlankResidentForm();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _workspaceController.dispose();
     _fullNameController.dispose();
     _roomNumberController.dispose();
@@ -67,6 +74,35 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     _unitLabelController.dispose();
     _aboutMeController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+
+    unawaited(_refreshOnResume());
+  }
+
+  Future<void> _refreshOnResume() async {
+    final now = DateTime.now();
+    final lastResumeRefreshAt = _lastResumeRefreshAt;
+    if (lastResumeRefreshAt != null &&
+        now.difference(lastResumeRefreshAt) < const Duration(seconds: 2)) {
+      return;
+    }
+
+    _lastResumeRefreshAt = now;
+
+    final sessionRecovered = await context
+        .read<ManagerSessionController>()
+        .renewSessionSilently();
+    if (!mounted || !sessionRecovered) {
+      return;
+    }
+
+    await _workspaceController.refreshSelectedTab();
   }
 
   void _seedBlankResidentForm() {
@@ -119,12 +155,10 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
         floorNumber == null ||
         _unitLabelController.text.trim().isEmpty ||
         _aboutMeController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Complete every resident field before saving the record.',
-          ),
-        ),
+      showManagerNotice(
+        context,
+        message: 'Complete every resident field before saving this record.',
+        isError: true,
       );
       return;
     }
@@ -139,6 +173,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
       isActive: _isActive,
       baselinePriority: _baselinePriority,
     );
+    final wasCreating = _editingResidentId == null;
 
     final saved = await _workspaceController.saveResident(
       draft: draft,
@@ -152,8 +187,11 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
       _seedBlankResidentForm();
       _isResidentEditorVisible = false;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Resident record saved.')),
+    showManagerNotice(
+      context,
+      message: wasCreating
+          ? 'Resident record created.'
+          : 'Resident record updated.',
     );
   }
 
@@ -167,15 +205,17 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(successMessage)),
-      );
-    } on ApiException catch (error) {
+      showManagerNotice(context, message: successMessage);
+    } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
+      showManagerNotice(
+        context,
+        message: error is ApiException
+            ? error.message
+            : 'The manager workspace can’t reach the API right now.',
+        isError: true,
       );
     }
   }
@@ -183,8 +223,9 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
   Future<void> _acknowledgeIncident(String incidentId, String shiftId) {
     return _runIncidentAction(
       incidentId: incidentId,
-      action: () => _workspaceController.acknowledgeIncident(incidentId, shiftId),
-      successMessage: 'Incident acknowledged.',
+      action: () =>
+          _workspaceController.acknowledgeIncident(incidentId, shiftId),
+      successMessage: 'Incident marked as acknowledged.',
     );
   }
 
@@ -192,7 +233,7 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
     return _runIncidentAction(
       incidentId: incidentId,
       action: () => _workspaceController.resolveIncident(incidentId, shiftId),
-      successMessage: 'Incident resolved.',
+      successMessage: 'Incident marked as resolved.',
     );
   }
 
@@ -211,12 +252,16 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
         fileName: fileName,
         csv: csv,
       );
-    } on ApiException catch (error) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
+      showManagerNotice(
+        context,
+        message: error is ApiException
+            ? error.message
+            : 'The manager workspace can’t reach the API right now.',
+        isError: true,
       );
     }
   }
@@ -294,12 +339,9 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
 
   void _selectTab(WorkspaceTab tab) {
     if (tab == WorkspaceTab.console) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'This area is not part of the current manager workflow.',
-          ),
-        ),
+      showManagerNotice(
+        context,
+        message: 'Operational tools are outside the current demo workspace.',
       );
       return;
     }
@@ -309,6 +351,70 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
 
   Future<void> _refreshSelectedTab() async {
     await _workspaceController.refreshSelectedTab();
+  }
+
+  DateTime? _selectedTabLastUpdated(
+    ManagerWorkspaceController workspaceController,
+  ) {
+    switch (workspaceController.selectedTab) {
+      case WorkspaceTab.dashboard:
+        return workspaceController.dashboardLastUpdatedAt;
+      case WorkspaceTab.residents:
+        return workspaceController.residentsLastUpdatedAt;
+      case WorkspaceTab.compliance:
+        final dashboardUpdatedAt = workspaceController.dashboardLastUpdatedAt;
+        final residentsUpdatedAt = workspaceController.residentsLastUpdatedAt;
+        if (dashboardUpdatedAt == null) {
+          return residentsUpdatedAt;
+        }
+        if (residentsUpdatedAt == null) {
+          return dashboardUpdatedAt;
+        }
+        return dashboardUpdatedAt.isAfter(residentsUpdatedAt)
+            ? dashboardUpdatedAt
+            : residentsUpdatedAt;
+      case WorkspaceTab.console:
+        return null;
+    }
+  }
+
+  bool _isSelectedTabRefreshing(
+    ManagerWorkspaceController workspaceController,
+  ) {
+    switch (workspaceController.selectedTab) {
+      case WorkspaceTab.dashboard:
+        return workspaceController.isDashboardLoading &&
+            workspaceController.dashboard != null;
+      case WorkspaceTab.residents:
+        return workspaceController.isResidentsLoading &&
+            workspaceController.residents.isNotEmpty;
+      case WorkspaceTab.compliance:
+        return (workspaceController.isDashboardLoading &&
+                workspaceController.dashboard != null) ||
+            (workspaceController.isResidentsLoading &&
+                workspaceController.residents.isNotEmpty);
+      case WorkspaceTab.console:
+        return false;
+    }
+  }
+
+  String? _headerStatusLabel(ManagerWorkspaceController workspaceController) {
+    switch (workspaceController.selectedTab) {
+      case WorkspaceTab.dashboard:
+        return formatManagerFreshnessLabel(
+          workspaceController.dashboardLastUpdatedAt,
+          isRefreshing: _isSelectedTabRefreshing(workspaceController),
+          isLive: true,
+        );
+      case WorkspaceTab.residents:
+      case WorkspaceTab.compliance:
+        return formatManagerFreshnessLabel(
+          _selectedTabLastUpdated(workspaceController),
+          isRefreshing: _isSelectedTabRefreshing(workspaceController),
+        );
+      case WorkspaceTab.console:
+        return null;
+    }
   }
 
   @override
@@ -354,102 +460,185 @@ class _ManagerWorkspaceScreenState extends State<ManagerWorkspaceScreen> {
                                   children: [
                                     WorkspaceHeader(
                                       title: workspaceController.headerTitle,
-                                      trailingLabel: formatLongDate(DateTime.now()),
+                                      trailingLabel: formatLongDate(
+                                        DateTime.now(),
+                                      ),
                                       onRefresh: _refreshSelectedTab,
+                                      statusLabel: _headerStatusLabel(
+                                        workspaceController,
+                                      ),
+                                      statusIcon:
+                                          workspaceController.selectedTab ==
+                                              WorkspaceTab.dashboard
+                                          ? Icons.wifi_tethering_rounded
+                                          : Icons.schedule_rounded,
+                                      isRefreshing: _isSelectedTabRefreshing(
+                                        workspaceController,
+                                      ),
                                     ),
                                     Expanded(
                                       child: SingleChildScrollView(
                                         padding: const EdgeInsets.all(24),
                                         child: AnimatedSwitcher(
-                                          duration: const Duration(milliseconds: 220),
-                                          child: switch (workspaceController.selectedTab) {
-                                            WorkspaceTab.dashboard => DashboardOverview(
-                                                key: const ValueKey('dashboard'),
+                                          duration: const Duration(
+                                            milliseconds: 220,
+                                          ),
+                                          child: switch (workspaceController
+                                              .selectedTab) {
+                                            WorkspaceTab.dashboard =>
+                                              DashboardOverview(
+                                                key: const ValueKey(
+                                                  'dashboard',
+                                                ),
                                                 apiClient: widget.apiClient,
-                                                fileDownloader: widget.fileDownloader,
-                                                accessToken: widget.session.accessToken,
-                                                dashboard: workspaceController.dashboard,
-                                                activeShifts: workspaceController.activeShifts,
-                                                isLoading: workspaceController.isDashboardLoading,
-                                                errorMessage: workspaceController.dashboardError,
+                                                fileDownloader:
+                                                    widget.fileDownloader,
+                                                accessToken:
+                                                    widget.session.accessToken,
+                                                dashboard: workspaceController
+                                                    .dashboard,
+                                                activeShifts:
+                                                    workspaceController
+                                                        .activeShifts,
+                                                isLoading: workspaceController
+                                                    .isDashboardLoading,
+                                                errorMessage:
+                                                    workspaceController
+                                                        .dashboardError,
                                                 pendingIncidentIds:
-                                                    workspaceController.pendingIncidentIds,
+                                                    workspaceController
+                                                        .pendingIncidentIds,
                                                 onAcknowledgeIncident:
                                                     _acknowledgeIncident,
-                                                onResolveIncident: _resolveIncident,
+                                                onResolveIncident:
+                                                    _resolveIncident,
                                               ),
-                                            WorkspaceTab.residents => ResidentsManagement(
-                                                key: const ValueKey('residents'),
+                                            WorkspaceTab.residents =>
+                                              ResidentsManagement(
+                                                key: const ValueKey(
+                                                  'residents',
+                                                ),
                                                 apiClient: widget.apiClient,
-                                                fileDownloader: widget.fileDownloader,
-                                                accessToken: widget.session.accessToken,
-                                                residents: workspaceController.residents,
-                                                isLoading: workspaceController.isResidentsLoading,
-                                                isSaving: workspaceController.isSavingResident,
-                                                isEditorVisible: _isResidentEditorVisible,
-                                                errorMessage: workspaceController.residentsError,
-                                                editingResidentId: _editingResidentId,
-                                                fullNameController: _fullNameController,
-                                                roomNumberController: _roomNumberController,
-                                                floorNumberController: _floorNumberController,
-                                                unitLabelController: _unitLabelController,
-                                                aboutMeController: _aboutMeController,
-                                                recognitionImageKey: _recognitionImageKey,
+                                                fileDownloader:
+                                                    widget.fileDownloader,
+                                                accessToken:
+                                                    widget.session.accessToken,
+                                                residents: workspaceController
+                                                    .residents,
+                                                isLoading: workspaceController
+                                                    .isResidentsLoading,
+                                                isSaving: workspaceController
+                                                    .isSavingResident,
+                                                isEditorVisible:
+                                                    _isResidentEditorVisible,
+                                                errorMessage:
+                                                    workspaceController
+                                                        .residentsError,
+                                                editingResidentId:
+                                                    _editingResidentId,
+                                                fullNameController:
+                                                    _fullNameController,
+                                                roomNumberController:
+                                                    _roomNumberController,
+                                                floorNumberController:
+                                                    _floorNumberController,
+                                                unitLabelController:
+                                                    _unitLabelController,
+                                                aboutMeController:
+                                                    _aboutMeController,
+                                                recognitionImageKey:
+                                                    _recognitionImageKey,
                                                 isActive: _isActive,
-                                                baselinePriority: _baselinePriority,
-                                                onRecognitionImageChanged: (value) =>
-                                                    setState(() => _recognitionImageKey = value),
+                                                baselinePriority:
+                                                    _baselinePriority,
+                                                onRecognitionImageChanged:
+                                                    (value) => setState(
+                                                      () =>
+                                                          _recognitionImageKey =
+                                                              value,
+                                                    ),
                                                 onActiveChanged: (value) =>
-                                                    setState(() => _isActive = value),
-                                                onBaselinePriorityChanged: (value) =>
-                                                    setState(() => _baselinePriority = value),
-                                                onCreateResident: _startCreateResident,
-                                                onCloseResidentEditor: _closeResidentEditor,
-                                                onEditResident: _startEditResident,
+                                                    setState(
+                                                      () => _isActive = value,
+                                                    ),
+                                                onBaselinePriorityChanged:
+                                                    (value) => setState(
+                                                      () => _baselinePriority =
+                                                          value,
+                                                    ),
+                                                onCreateResident:
+                                                    _startCreateResident,
+                                                onCloseResidentEditor:
+                                                    _closeResidentEditor,
+                                                onEditResident:
+                                                    _startEditResident,
                                                 onMedicationDataChanged:
-                                                    workspaceController.refreshOperationalData,
+                                                    workspaceController
+                                                        .refreshOperationalData,
                                                 onSaveResident: _saveResident,
                                               ),
                                             WorkspaceTab.compliance => CqcEvidencePack(
-                                                key: const ValueKey('compliance'),
-                                                dashboard: workspaceController.dashboard,
-                                                activeShifts: workspaceController.activeShifts,
-                                                residents: workspaceController.residents,
-                                                isDashboardLoading:
-                                                    workspaceController.isDashboardLoading,
-                                                isResidentsLoading:
-                                                    workspaceController.isResidentsLoading,
-                                                dashboardError:
-                                                    workspaceController.dashboardError,
-                                                residentsError:
-                                                    workspaceController.residentsError,
-                                                onDownloadSummary: () =>
-                                                    unawaited(_downloadEvidencePackSummaryCsv()),
-                                                onDownloadIncidentRegister: () =>
-                                                    unawaited(_downloadIncidentRegisterCsv()),
-                                                onDownloadMedicationAudit: () =>
-                                                    unawaited(_downloadMedicationAuditCsv()),
-                                                onDownloadMedicationRound:
-                                                    workspaceController.activeShifts.isEmpty
-                                                        ? null
-                                                        : () => unawaited(
-                                                              _downloadMedicationRoundCsv(
-                                                                (workspaceController.dashboard
-                                                                            ?.activeShift ??
-                                                                        workspaceController.activeShifts.first)
-                                                                    .id,
-                                                              ),
-                                                            ),
-                                                onDownloadResidentEmar: (resident) =>
-                                                    unawaited(_downloadResidentEmarCsv(resident)),
-                                                onDownloadResidentDowntimePack:
-                                                    (resident) => unawaited(
-                                                      _downloadResidentDowntimePackCsv(
-                                                        resident,
+                                              key: const ValueKey('compliance'),
+                                              dashboard:
+                                                  workspaceController.dashboard,
+                                              activeShifts: workspaceController
+                                                  .activeShifts,
+                                              residents:
+                                                  workspaceController.residents,
+                                              isDashboardLoading:
+                                                  workspaceController
+                                                      .isDashboardLoading,
+                                              isResidentsLoading:
+                                                  workspaceController
+                                                      .isResidentsLoading,
+                                              dashboardError:
+                                                  workspaceController
+                                                      .dashboardError,
+                                              residentsError:
+                                                  workspaceController
+                                                      .residentsError,
+                                              onDownloadSummary: () => unawaited(
+                                                _downloadEvidencePackSummaryCsv(),
+                                              ),
+                                              onDownloadIncidentRegister: () =>
+                                                  unawaited(
+                                                    _downloadIncidentRegisterCsv(),
+                                                  ),
+                                              onDownloadMedicationAudit: () =>
+                                                  unawaited(
+                                                    _downloadMedicationAuditCsv(),
+                                                  ),
+                                              onDownloadMedicationRound:
+                                                  workspaceController
+                                                      .activeShifts
+                                                      .isEmpty
+                                                  ? null
+                                                  : () => unawaited(
+                                                      _downloadMedicationRoundCsv(
+                                                        (workspaceController
+                                                                    .dashboard
+                                                                    ?.activeShift ??
+                                                                workspaceController
+                                                                    .activeShifts
+                                                                    .first)
+                                                            .id,
                                                       ),
                                                     ),
-                                              ),
-                                            WorkspaceTab.console => const ComingSoonPanel(
+                                              onDownloadResidentEmar:
+                                                  (resident) => unawaited(
+                                                    _downloadResidentEmarCsv(
+                                                      resident,
+                                                    ),
+                                                  ),
+                                              onDownloadResidentDowntimePack:
+                                                  (resident) => unawaited(
+                                                    _downloadResidentDowntimePackCsv(
+                                                      resident,
+                                                    ),
+                                                  ),
+                                            ),
+                                            WorkspaceTab.console =>
+                                              const ComingSoonPanel(
                                                 key: ValueKey('console'),
                                                 title: 'Operational tools',
                                                 body:

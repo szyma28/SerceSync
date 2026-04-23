@@ -42,10 +42,7 @@ class CqcEvidencePack extends StatelessWidget {
         isResidentsLoading &&
         dashboard == null &&
         residents.isEmpty) {
-      return const SizedBox(
-        height: 360,
-        child: Center(child: CircularProgressIndicator()),
-      );
+      return const _ReportingLoadingSkeleton();
     }
 
     final activeResidents = residents
@@ -96,7 +93,7 @@ class CqcEvidencePack extends StatelessWidget {
               'Current incident-level follow-up items from the manager dashboard can now be exported as a CSV register for inspection prep and handover review.',
           child: visibleIncidents.isEmpty
               ? const EmptySurface(
-                  title: 'No live incidents in scope',
+                  title: 'No incidents currently in scope',
                   body:
                       'The incident register export is still available and will download an empty register until new incidents appear.',
                 )
@@ -209,7 +206,7 @@ class _CqcPackHeroCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'A lightweight operational evidence view built around the CQC key questions. It packages what SerceSync can already evidence today without pretending to be a full compliance system.',
+                      'A focused operational export view for the evidence trail SerceSync can show today, ready for handover prep, inspections, and shift review.',
                       style: TextStyle(color: managerMuted, height: 1.6),
                     ),
                   ],
@@ -226,7 +223,7 @@ class _CqcPackHeroCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Text(
-                  'Operational evidence only',
+                  'Live export snapshot',
                   style: TextStyle(
                     color: Color(0xFF9A6700),
                     fontWeight: FontWeight.w700,
@@ -296,6 +293,56 @@ class _CqcPackHeroCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ReportingLoadingSkeleton extends StatelessWidget {
+  const _ReportingLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: const [
+        ManagerSkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ManagerSkeletonBlock(height: 20, width: 180),
+              SizedBox(height: 12),
+              ManagerSkeletonBlock(height: 14, width: double.infinity),
+              SizedBox(height: 8),
+              ManagerSkeletonBlock(height: 14, width: 300),
+              SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(child: ManagerSkeletonBlock(height: 52, radius: 18)),
+                  SizedBox(width: 12),
+                  Expanded(child: ManagerSkeletonBlock(height: 52, radius: 18)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        ManagerSkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ManagerSkeletonBlock(height: 18, width: 220),
+              SizedBox(height: 12),
+              ManagerSkeletonBlock(height: 14, width: double.infinity),
+              SizedBox(height: 8),
+              ManagerSkeletonBlock(height: 14, width: 260),
+              SizedBox(height: 16),
+              ManagerSkeletonBlock(
+                height: 120,
+                width: double.infinity,
+                radius: 18,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -757,7 +804,9 @@ String buildCqcEvidencePackSummaryCsv({
     ]);
   }
 
-  return rows.map((row) => row.map(_csvEscape).join(',')).join('\n');
+  return rows
+      .map((row) => row.map(escapeCsvCellForExport).join(','))
+      .join('\n');
 }
 
 String buildIncidentRegisterCsv({
@@ -826,10 +875,16 @@ String buildIncidentRegisterCsv({
     }
   }
 
-  return rows.map((row) => row.map(_csvEscape).join(',')).join('\n');
+  return rows
+      .map((row) => row.map(escapeCsvCellForExport).join(','))
+      .join('\n');
 }
 
-String _csvEscape(String value) {
-  final normalized = value.replaceAll('"', '""');
+String escapeCsvCellForExport(String value) {
+  final normalizedValue =
+      value.isNotEmpty && RegExp(r'^[=+\-@]').hasMatch(value)
+      ? "'$value"
+      : value;
+  final normalized = normalizedValue.replaceAll('"', '""');
   return '"$normalized"';
 }

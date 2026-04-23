@@ -3,7 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../controllers/mobile_session_controller.dart';
 import '../theme/app_theme.dart';
-import 'handover_screen.dart';
+
+const _enableDemoLoginPrefill = bool.fromEnvironment(
+  'ENABLE_DEMO_LOGIN_PREFILL',
+  defaultValue: false,
+);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,14 +17,19 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  bool _hasAppliedSavedBaseUrl = false;
   final _apiBaseUrlController = TextEditingController(
     text: const String.fromEnvironment(
       'API_BASE_URL',
       defaultValue: 'http://localhost:3000',
     ),
   );
-  final _emailController = TextEditingController(text: 'carer@sercesync.local');
-  final _passwordController = TextEditingController(text: 'Password123!');
+  final _emailController = TextEditingController(
+    text: _enableDemoLoginPrefill ? 'carer@sercesync.local' : '',
+  );
+  final _passwordController = TextEditingController(
+    text: _enableDemoLoginPrefill ? 'Password123!' : '',
+  );
 
   @override
   void dispose() {
@@ -32,18 +41,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     final sessionController = context.read<MobileSessionController>();
-    final loginSucceeded = await sessionController.login(
+    await sessionController.login(
       baseUrl: _apiBaseUrlController.text,
       email: _emailController.text,
       password: _passwordController.text,
-    );
-
-    if (!mounted || !loginSucceeded) {
-      return;
-    }
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HandoverScreen()),
     );
   }
 
@@ -51,6 +52,12 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final sessionController = context.watch<MobileSessionController>();
+    if (!_hasAppliedSavedBaseUrl &&
+        sessionController.lastBaseUrl != null &&
+        sessionController.lastBaseUrl!.trim().isNotEmpty) {
+      _apiBaseUrlController.text = sessionController.lastBaseUrl!;
+      _hasAppliedSavedBaseUrl = true;
+    }
     final isBusy = sessionController.isAuthenticating;
     final errorMessage = sessionController.authErrorMessage;
 

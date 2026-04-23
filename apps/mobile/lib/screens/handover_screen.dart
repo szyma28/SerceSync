@@ -7,8 +7,12 @@ import '../controllers/mobile_session_controller.dart';
 import '../models/handover.dart';
 import '../models/user.dart';
 import '../theme/app_theme.dart';
+import '../widgets/data_freshness_indicator.dart';
 import '../widgets/date_time_formatters.dart';
+import '../widgets/loading_skeleton.dart';
+import '../widgets/resume_refresh_mixin.dart';
 import '../widgets/screen_message_state.dart';
+import '../widgets/status_banner.dart';
 import 'shift_workspace_screen.dart';
 
 class HandoverScreen extends StatefulWidget {
@@ -18,38 +22,84 @@ class HandoverScreen extends StatefulWidget {
   State<HandoverScreen> createState() => _HandoverScreenState();
 }
 
-class _HandoverScreenState extends State<HandoverScreen> {
+class _HandoverScreenState extends State<HandoverScreen>
+    with WidgetsBindingObserver, ResumeRefreshStateMixin {
   @override
   void initState() {
     super.initState();
     unawaited(context.read<MobileSessionController>().loadCurrentHandover());
   }
 
+  @override
+  bool get canTriggerResumeRefresh =>
+      context.read<MobileSessionController>().hasActiveSession;
+
+  @override
+  bool get hasVisibleContentForResumeRefresh =>
+      context.read<MobileSessionController>().handoverSnapshot != null;
+
+  @override
+  Future<void> refreshAfterResume() {
+    return context.read<MobileSessionController>().loadCurrentHandover(
+      forceRefresh: true,
+    );
+  }
+
   void _goToWorkspace() {
     final sessionController = context.read<MobileSessionController>();
     if (!sessionController.hasActiveSession ||
-        sessionController.apiClient == null ||
-        sessionController.accessToken == null ||
-        sessionController.user == null ||
         sessionController.handoverSnapshot == null) {
       return;
     }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => ShiftWorkspaceScreen(
-          apiClient: sessionController.apiClient!,
-          accessToken: sessionController.accessToken!,
-          user: sessionController.user!,
-          snapshot: sessionController.handoverSnapshot!,
-        ),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ShiftWorkspaceScreen()));
   }
 
   @override
   Widget build(BuildContext context) {
     final sessionController = context.watch<MobileSessionController>();
+    final showCachedBanner =
+        sessionController.handoverShowingCachedData ||
+        (sessionController.handoverErrorMessage != null &&
+            sessionController.handoverSnapshot != null);
+    final banner = showCachedBanner
+        ? StatusBanner(
+            icon: sessionController.handoverErrorMessage == null
+                ? Icons.cloud_off_outlined
+                : Icons.wifi_tethering_error_rounded,
+            title: sessionController.handoverErrorMessage == null
+                ? 'Showing cached handover'
+                : 'Using cached handover',
+            message:
+                sessionController.handoverErrorMessage ??
+                'This handover will refresh when the connection comes back.',
+            lastUpdatedAt: sessionController.handoverLastUpdatedAt,
+            actionLabel: 'Retry',
+            onAction: sessionController.isHandoverLoading
+                ? null
+                : () => unawaited(
+                    context.read<MobileSessionController>().loadCurrentHandover(
+                      forceRefresh: true,
+                    ),
+                  ),
+          )
+        : null;
+    final freshnessIndicator =
+        !showCachedBanner && sessionController.handoverSnapshot != null
+        ? DataFreshnessIndicator(
+            lastUpdatedAt: sessionController.handoverLastUpdatedAt,
+            isRefreshing: sessionController.isHandoverLoading,
+            label: 'Live handover',
+          )
+        : null;
+    final content = _buildContent(
+      isLoading: sessionController.isHandoverLoading,
+      errorMessage: sessionController.handoverErrorMessage,
+      snapshot: sessionController.handoverSnapshot,
+      user: sessionController.user,
+    );
 
     return Container(
       decoration: AppTheme.atmosphericBackground,
@@ -63,24 +113,34 @@ class _HandoverScreenState extends State<HandoverScreen> {
               onPressed: sessionController.isHandoverLoading
                   ? null
                   : () => unawaited(
-                      context.read<MobileSessionController>().loadCurrentHandover(
-                        forceRefresh: true,
-                      ),
+                      context
+                          .read<MobileSessionController>()
+                          .loadCurrentHandover(forceRefresh: true),
                     ),
             ),
           ],
         ),
         body: SafeArea(
-          child: sessionController.isHandoverLoading &&
+          child:
+              sessionController.isHandoverLoading &&
                   sessionController.handoverSnapshot == null
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primaryBlue),
-                )
-              : _buildContent(
-                  isLoading: sessionController.isHandoverLoading,
-                  errorMessage: sessionController.handoverErrorMessage,
-                  snapshot: sessionController.handoverSnapshot,
-                  user: sessionController.user,
+              ? const _HandoverLoadingSkeleton()
+              : banner == null && freshnessIndicator == null
+              ? content
+              : Column(
+                  children: [
+                    if (banner != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: banner,
+                      ),
+                    if (freshnessIndicator != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: freshnessIndicator,
+                      ),
+                    Expanded(child: content),
+                  ],
                 ),
         ),
       ),
@@ -103,9 +163,9 @@ class _HandoverScreenState extends State<HandoverScreen> {
           context,
         ).textTheme.bodyLarge?.copyWith(color: AppTheme.textSecondary),
         actionLabel: 'Try Again',
-        onAction: () => context.read<MobileSessionController>().loadCurrentHandover(
-          forceRefresh: true,
-        ),
+        onAction: () => context
+            .read<MobileSessionController>()
+            .loadCurrentHandover(forceRefresh: true),
       );
     }
 
@@ -244,9 +304,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                               children: [
                                 Text(
                                   snapshot.shift.name,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleLarge
+                                  style: Theme.of(context).textTheme.titleLarge
                                       ?.copyWith(
                                         color: AppTheme.primaryBlueDark,
                                       ),
@@ -258,9 +316,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                                     snapshot.shift.endsAt,
                                     separator: ' — ',
                                   ),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
+                                  style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(
                                         color: AppTheme.textPrimary,
                                         fontWeight: FontWeight.w600,
@@ -287,9 +343,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                               const SizedBox(width: 8),
                               Text(
                                 'SHIFT NOTES',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelLarge
+                                style: Theme.of(context).textTheme.labelLarge
                                     ?.copyWith(
                                       color: AppTheme.textSecondary,
                                       letterSpacing: 1.2,
@@ -301,9 +355,7 @@ class _HandoverScreenState extends State<HandoverScreen> {
                           const SizedBox(height: 16),
                           Text(
                             snapshot.handover.summary,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyLarge
+                            style: Theme.of(context).textTheme.bodyLarge
                                 ?.copyWith(
                                   height: 1.6,
                                   color: AppTheme.textPrimary,
@@ -364,8 +416,8 @@ class _HandoverScreenState extends State<HandoverScreen> {
               onPressed: isLoading
                   ? null
                   : () => context
-                      .read<MobileSessionController>()
-                      .acknowledgeCurrentHandover(),
+                        .read<MobileSessionController>()
+                        .acknowledgeCurrentHandover(),
               child: isLoading
                   ? const SizedBox(
                       height: 24,
@@ -377,6 +429,52 @@ class _HandoverScreenState extends State<HandoverScreen> {
                     )
                   : const Text('Acknowledge and start'),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HandoverLoadingSkeleton extends StatelessWidget {
+  const _HandoverLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: const [
+        SizedBox(height: 28),
+        Center(child: SkeletonAvatar(size: 72)),
+        SizedBox(height: 24),
+        Center(child: SkeletonBlock(height: 20, width: 180, radius: 12)),
+        SizedBox(height: 10),
+        Center(child: SkeletonBlock(height: 16, width: 240, radius: 12)),
+        SizedBox(height: 26),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 18, width: 160, radius: 12),
+              SizedBox(height: 16),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: 220, radius: 10),
+              SizedBox(height: 18),
+              SkeletonBlock(height: 120, width: double.infinity, radius: 20),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 16, width: 140, radius: 10),
+              SizedBox(height: 12),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 8),
+              SkeletonBlock(height: 14, width: 260, radius: 10),
+            ],
           ),
         ),
       ],

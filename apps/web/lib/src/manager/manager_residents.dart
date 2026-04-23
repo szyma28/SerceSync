@@ -171,7 +171,7 @@ class _ResidentsListCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Keep room placement, unit ownership, and care context aligned with the live manager view.',
+                      'Review room placement, unit ownership, and resident context from one live directory.',
                       style: TextStyle(color: managerMuted, height: 1.5),
                     ),
                   ],
@@ -202,7 +202,7 @@ class _ResidentsListCard extends StatelessWidget {
           if (isLoading)
             const SizedBox(
               height: 360,
-              child: Center(child: CircularProgressIndicator()),
+              child: _ResidentsListLoadingState(),
             )
           else if (residents.isEmpty)
             const EmptySurface(
@@ -236,6 +236,75 @@ class _ResidentsListCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _ResidentsListLoadingState extends StatelessWidget {
+  const _ResidentsListLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: const [
+        ManagerSkeletonCard(
+          margin: EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              ManagerSkeletonBlock(height: 48, width: 48, radius: 24),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ManagerSkeletonBlock(height: 16, width: 180),
+                    SizedBox(height: 8),
+                    ManagerSkeletonBlock(height: 14, width: 260),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        ManagerSkeletonCard(
+          margin: EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              ManagerSkeletonBlock(height: 48, width: 48, radius: 24),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ManagerSkeletonBlock(height: 16, width: 170),
+                    SizedBox(height: 8),
+                    ManagerSkeletonBlock(height: 14, width: 220),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        ManagerSkeletonCard(
+          margin: EdgeInsets.zero,
+          child: Row(
+            children: [
+              ManagerSkeletonBlock(height: 48, width: 48, radius: 24),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ManagerSkeletonBlock(height: 16, width: 160),
+                    SizedBox(height: 8),
+                    ManagerSkeletonBlock(height: 14, width: 250),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

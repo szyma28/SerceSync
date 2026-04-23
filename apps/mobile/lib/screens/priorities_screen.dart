@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/mobile_session_controller.dart';
 import '../controllers/shift_workspace_controller.dart';
 import '../models/workspace_models.dart';
 import '../screens/resident_detail_screen.dart';
 import '../theme/app_theme.dart';
+import '../widgets/data_freshness_indicator.dart';
+import '../widgets/loading_skeleton.dart';
 import '../widgets/priority_card.dart';
 import '../widgets/screen_message_state.dart';
+import '../widgets/status_banner.dart';
 import 'medication_round_screen.dart';
 
 class PrioritiesScreen extends StatefulWidget {
@@ -109,10 +113,6 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
       MaterialPageRoute(
         builder: (_) => ResidentDetailScreen(
           residentId: item.residentId!,
-          apiClient: _workspaceController.apiClient,
-          accessToken: _workspaceController.accessToken,
-          currentCarerName: _workspaceController.currentCarerName,
-          currentUserRole: _workspaceController.currentUserRole,
           highlightTaskId: item.sourceTask?.id,
         ),
       ),
@@ -152,14 +152,30 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
   @override
   Widget build(BuildContext context) {
     final workspaceController = context.watch<ShiftWorkspaceController>();
+    final sessionController = context.watch<MobileSessionController>();
     final priorities = _buildPriorityItems(workspaceController);
     final medicationSummary =
         workspaceController.overview?.medicationSummary ??
         const MedicationTaskSummary();
+    final showStatusBanner =
+        workspaceController.showingCachedPrioritiesData ||
+        workspaceController.prioritiesErrorMessage != null;
+    final freshnessIndicator =
+        !showStatusBanner &&
+            (workspaceController.prioritiesLastUpdatedAt != null ||
+                workspaceController.overview != null ||
+                workspaceController.tasks.isNotEmpty)
+        ? DataFreshnessIndicator(
+            lastUpdatedAt: workspaceController.prioritiesLastUpdatedAt,
+            isRefreshing: workspaceController.isPrioritiesLoading,
+            label: 'Live shift priorities',
+          )
+        : const SizedBox.shrink();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         toolbarHeight: 74,
         title: Column(
           children: [
@@ -190,9 +206,7 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
             workspaceController.isPrioritiesLoading &&
                 workspaceController.tasks.isEmpty &&
                 workspaceController.overview == null
-            ? const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryBlue),
-              )
+            ? const _PrioritiesLoadingSkeleton()
             : workspaceController.prioritiesErrorMessage != null &&
                   workspaceController.tasks.isEmpty &&
                   workspaceController.overview == null
@@ -210,9 +224,43 @@ class _PrioritiesScreenState extends State<PrioritiesScreen> {
             : RefreshIndicator(
                 onRefresh: _loadPriorities,
                 color: AppTheme.primaryBlue,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
-                  children: [
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
+                    children: [
+                    if (showStatusBanner)
+                      StatusBanner(
+                        icon: workspaceController.prioritiesErrorMessage == null
+                            ? Icons.cloud_off_outlined
+                            : Icons.wifi_tethering_error_rounded,
+                        title:
+                            workspaceController.prioritiesErrorMessage == null
+                            ? 'Showing cached priorities'
+                            : 'Using cached priorities',
+                        message:
+                            workspaceController.prioritiesErrorMessage ??
+                            'This list will refresh when the connection comes back.',
+                        lastUpdatedAt:
+                            workspaceController.prioritiesLastUpdatedAt,
+                        actionLabel: 'Retry',
+                        onAction: _loadPriorities,
+                      ),
+                    freshnessIndicator,
+                    if (sessionController.syncSummary.hasPendingWork)
+                      StatusBanner(
+                        icon: sessionController.syncSummary.hasFailures
+                            ? Icons.sync_problem_rounded
+                            : Icons.sync_rounded,
+                        title: sessionController.syncSummary.headline,
+                        message:
+                            'Queued notes and incidents will keep trying to sync from this device.',
+                        actionLabel: sessionController.syncSummary.hasFailures
+                            ? 'Retry'
+                            : null,
+                        onAction: sessionController.syncSummary.hasFailures
+                            ? () => sessionController.syncService
+                                  .retryFailedMutations()
+                            : null,
+                      ),
                     if (workspaceController.currentUserRole ==
                         AppUserRole.nurse) ...[
                       _MedicationRoundQuickAccessCard(
@@ -275,13 +323,9 @@ class _PriorityBandSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 10),
-        if (items.isEmpty)
-          Container(
+    final sectionBody = items.isEmpty
+        ? Container(
+            key: ValueKey('priority-empty-$title'),
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -296,10 +340,83 @@ class _PriorityBandSection extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
             ),
           )
-        else
-          ...items.map(
-            (item) => PriorityCard(item: item, onTap: () => onTap(item)),
+        : Column(
+            key: ValueKey('priority-items-$title-${items.length}'),
+            children: items
+                .map((item) => PriorityCard(item: item, onTap: () => onTap(item)))
+                .toList(growable: false),
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 10),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: sectionBody,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PrioritiesLoadingSkeleton extends StatelessWidget {
+  const _PrioritiesLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 112),
+      children: const [
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 20, width: 180, radius: 12),
+              SizedBox(height: 12),
+              SkeletonBlock(height: 14, width: 220, radius: 10),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(child: SkeletonBlock(height: 56, radius: 16)),
+                  SizedBox(width: 10),
+                  Expanded(child: SkeletonBlock(height: 56, radius: 16)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SkeletonBlock(height: 22, width: 84, radius: 10),
+        SizedBox(height: 10),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 18, width: 160, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 8),
+              SkeletonBlock(height: 14, width: 220, radius: 10),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 18, width: 150, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 8),
+              SkeletonBlock(height: 14, width: 240, radius: 10),
+            ],
+          ),
+        ),
       ],
     );
   }

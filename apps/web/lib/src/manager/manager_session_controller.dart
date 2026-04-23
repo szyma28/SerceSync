@@ -37,6 +37,23 @@ class ManagerSessionController extends ChangeNotifier {
     }
   }
 
+  Future<bool> renewSessionSilently() async {
+    try {
+      _session = await apiClient.restoreSession();
+      _restoreErrorMessage = null;
+      notifyListeners();
+      return true;
+    } on ApiException catch (error) {
+      if (error.statusCode == 401) {
+        _session = null;
+        notifyListeners();
+        return false;
+      }
+
+      return _session != null;
+    }
+  }
+
   Future<bool> login({required String email, required String password}) async {
     _isAuthenticating = true;
     _authErrorMessage = null;

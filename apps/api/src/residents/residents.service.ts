@@ -38,21 +38,22 @@ import {
   activeIncidentStatuses,
   buildEntryTitle,
   incidentInclude,
+  isSafeResidentEvidenceUpload,
 } from './residents.constants';
 import {
   buildAlerts,
   buildContextLine,
   buildManagerComplianceSeries,
+  buildManagerDashboardExceptionFeed,
+  buildManagerDashboardMetrics,
   getDashboardTaskStatus,
   mapIncident,
   mapIncidentCreatedActivityFeedItem,
-  mapIncidentExceptionFeedItem,
   mapIncidentTransitionActivityFeedItem,
   mapManagerResident,
   mapResidentListItem,
   mapResidentTask,
   mapTaskActivityFeedItem,
-  mapTaskExceptionFeedItem,
   mapTimelineActivityFeedItem,
   mapTimelineEntry,
 } from './residents.presentation';
@@ -63,12 +64,6 @@ type UploadedEvidenceFile = {
   mimetype: string;
   size: number;
 };
-
-function stripRank<T extends { rank: number }>(item: T): Omit<T, 'rank'> {
-  const { rank, ...rest } = item;
-  void rank;
-  return rest;
-}
 
 type TaskActivityBadgeConfig = {
   badge: 'COMPLETED' | 'DEFERRED' | 'ESCALATED';
@@ -106,6 +101,9 @@ const emptyMedicationSummary: MedicationTaskCompatibleSummary = {
   warnings: [],
 };
 
+const maxClientEventFutureSkewMs = 5 * 60 * 1000;
+const maxClientEventAgeMs = 72 * 60 * 60 * 1000;
+
 function hasMedicationSignal(summary: MedicationTaskCompatibleSummary | null) {
   return (
     summary != null &&
@@ -117,6 +115,21 @@ function hasMedicationSignal(summary: MedicationTaskCompatibleSummary | null) {
       summary.warnings.length > 0)
   );
 }
+
+type ResidentAccessAuditArgs = {
+  user: AuthenticatedUser;
+  resident: {
+    id: string;
+    fullName: string;
+    roomLabel: string;
+    floorNumber: number;
+    unitLabel: string;
+  };
+  shiftId?: string | null;
+  medicationContentVisible: boolean;
+  activeIncidentCount?: number;
+  currentTaskCount?: number;
+};
 
 function getTaskActivityBadgeConfig(
   kind: AuditEventKind,
@@ -143,10 +156,6 @@ export class ResidentsService {
     private readonly medicationsService: MedicationsService,
     private readonly medicationOperationalSummaryService: MedicationOperationalSummaryService,
   ) {}
-
-  private clampNumber(value: number, minimum: number, maximum: number) {
-    return Math.min(Math.max(value, minimum), maximum);
-  }
 
   private getMediaStorageDirectory() {
     return join(tmpdir(), 'sercesync', 'resident-timeline-media');
@@ -255,6 +264,60 @@ export class ResidentsService {
     }
 
     return this.requireTrimmedText(value, fieldName);
+  }
+
+  private async createResidentAccessAuditEvent(args: ResidentAccessAuditArgs) {
+    await this.prisma.auditEvent.create({
+      data: {
+        kind: 'RESIDENT_RECORD_VIEWED',
+        userId: args.user.userId,
+        shiftId: args.shiftId ?? null,
+        residentId: args.resident.id,
+        details: {
+          residentId: args.resident.id,
+          residentName: args.resident.fullName,
+          roomLabel: args.resident.roomLabel,
+          floorNumber: args.resident.floorNumber,
+          unitLabel: args.resident.unitLabel,
+          viewerRole: args.user.role,
+          medicationContentVisible: args.medicationContentVisible,
+          activeIncidentCount: args.activeIncidentCount ?? null,
+          currentTaskCount: args.currentTaskCount ?? null,
+          accessScope: args.shiftId ? 'active-shift-floor-scope' : 'global',
+        } satisfies AuditEventDetails,
+      },
+    });
+  }
+
+  private resolveClientEventTime(
+    rawTimestamp: string | undefined,
+    fieldName: 'recordedAt' | 'occurredAt',
+  ) {
+    if (!rawTimestamp) {
+      return new Date();
+    }
+
+    const timestamp = new Date(rawTimestamp);
+    const now = Date.now();
+    const timestampMs = timestamp.getTime();
+
+    if (Number.isNaN(timestampMs)) {
+      throw new BadRequestException(`${fieldName} must be a valid ISO date.`);
+    }
+
+    if (timestampMs > now + maxClientEventFutureSkewMs) {
+      throw new BadRequestException(
+        `${fieldName} cannot be more than 5 minutes in the future.`,
+      );
+    }
+
+    if (timestampMs < now - maxClientEventAgeMs) {
+      throw new BadRequestException(
+        `${fieldName} cannot be older than 72 hours without a supervised late-entry workflow.`,
+      );
+    }
+
+    return timestamp;
   }
 
   private normalizeCreateResidentInput(input: CreateManagerResidentDto) {
@@ -638,7 +701,7 @@ export class ResidentsService {
             },
           },
           orderBy: {
-            createdAt: 'desc',
+            recordedAt: 'desc',
           },
           take: 18,
         }),
@@ -984,7 +1047,7 @@ export class ResidentsService {
             },
           },
           orderBy: {
-            createdAt: 'desc',
+            recordedAt: 'desc',
           },
           take: 12,
         },
@@ -1023,9 +1086,9 @@ export class ResidentsService {
     entryId: string,
     userId: string,
   ) {
-    if (!file.mimetype.startsWith('image/')) {
+    if (!isSafeResidentEvidenceUpload(file)) {
       throw new BadRequestException(
-        'Resident evidence uploads must be images.',
+        'Resident evidence uploads must be PNG, JPEG, or WebP images.',
       );
     }
 
@@ -1053,9 +1116,9 @@ export class ResidentsService {
     incidentId: string,
     userId: string,
   ) {
-    if (!file.mimetype.startsWith('image/')) {
+    if (!isSafeResidentEvidenceUpload(file)) {
       throw new BadRequestException(
-        'Incident evidence uploads must be images.',
+        'Incident evidence uploads must be PNG, JPEG, or WebP images.',
       );
     }
 
@@ -1153,10 +1216,10 @@ export class ResidentsService {
       : emptyMedicationSummary;
     const medicationSummary = this.canViewMedicationResidentContent(user)
       ? hasMedicationSignal(
-            medicationOperationalSummary?.taskSummaryCompatible ?? null,
-          )
-        ? medicationOperationalSummary?.taskSummaryCompatible ??
-          emptyMedicationSummary
+          medicationOperationalSummary?.taskSummaryCompatible ?? null,
+        )
+        ? (medicationOperationalSummary?.taskSummaryCompatible ??
+          emptyMedicationSummary)
         : medicationTaskSummary
       : emptyMedicationSummary;
     const medicationProfile = this.canViewMedicationResidentContent(user)
@@ -1165,6 +1228,15 @@ export class ResidentsService {
           user,
         )
       : null;
+
+    await this.createResidentAccessAuditEvent({
+      user,
+      resident,
+      shiftId: shift.id,
+      medicationContentVisible: medicationProfile != null,
+      activeIncidentCount: resident.incidents.length,
+      currentTaskCount: visibleTasks.length,
+    });
 
     return {
       id: resident.id,
@@ -1234,6 +1306,36 @@ export class ResidentsService {
       residentId,
       user.userId,
     );
+    const clientRequestId =
+      createResidentTimelineEntryDto.clientRequestId?.trim() || null;
+    const recordedAt = this.resolveClientEventTime(
+      createResidentTimelineEntryDto.recordedAt,
+      'recordedAt',
+    );
+
+    if (clientRequestId) {
+      const existingEntry = await this.prisma.residentTimelineEntry.findFirst({
+        where: {
+          residentId: resident.id,
+          createdById: user.userId,
+          clientRequestId,
+        },
+        include: {
+          createdBy: true,
+          media: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+        },
+      });
+
+      if (existingEntry) {
+        return {
+          entry: mapTimelineEntry(existingEntry),
+        };
+      }
+    }
 
     let mediaRecord: ResidentTimelineMedia | null = null;
 
@@ -1258,8 +1360,10 @@ export class ResidentsService {
             details: this.resolveTimelineEntryDetails(
               createResidentTimelineEntryDto,
             ),
+            clientRequestId,
             createdById: user.userId,
             shiftId: shift.id,
+            recordedAt,
           },
           include: {
             createdBy: true,
@@ -1325,6 +1429,36 @@ export class ResidentsService {
         }),
       };
     } catch (error) {
+      if (
+        clientRequestId &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existingEntry = await this.prisma.residentTimelineEntry.findFirst(
+          {
+            where: {
+              residentId: resident.id,
+              createdById: user.userId,
+              clientRequestId,
+            },
+            include: {
+              createdBy: true,
+              media: {
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
+            },
+          },
+        );
+
+        if (existingEntry) {
+          return {
+            entry: mapTimelineEntry(existingEntry),
+          };
+        }
+      }
+
       if (mediaRecord) {
         await this.cleanupResidentTimelineMediaRollback(mediaRecord);
       }
@@ -1343,9 +1477,30 @@ export class ResidentsService {
       user.userId,
     );
 
-    const occurredAt = createResidentIncidentDto.occurredAt
-      ? new Date(createResidentIncidentDto.occurredAt)
-      : new Date();
+    const clientRequestId =
+      createResidentIncidentDto.clientRequestId?.trim() || null;
+    const occurredAt = this.resolveClientEventTime(
+      createResidentIncidentDto.occurredAt,
+      'occurredAt',
+    );
+
+    if (clientRequestId) {
+      const existingIncident = await this.prisma.incident.findFirst({
+        where: {
+          residentId: resident.id,
+          createdById: user.userId,
+          clientRequestId,
+        },
+        include: incidentInclude,
+      });
+
+      if (existingIncident) {
+        return {
+          incident: mapIncident(existingIncident),
+          resident: await this.getResidentPrioritySnapshot(resident.id),
+        };
+      }
+    }
 
     let mediaRecord: IncidentMedia | null = null;
 
@@ -1366,6 +1521,7 @@ export class ResidentsService {
               createResidentIncidentDto.details,
               'details',
             ),
+            clientRequestId,
             occurredAt,
           },
           include: incidentInclude,
@@ -1433,6 +1589,28 @@ export class ResidentsService {
         resident: residentPriority,
       };
     } catch (error) {
+      if (
+        clientRequestId &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existingIncident = await this.prisma.incident.findFirst({
+          where: {
+            residentId: resident.id,
+            createdById: user.userId,
+            clientRequestId,
+          },
+          include: incidentInclude,
+        });
+
+        if (existingIncident) {
+          return {
+            incident: mapIncident(existingIncident),
+            resident: await this.getResidentPrioritySnapshot(resident.id),
+          };
+        }
+      }
+
       if (mediaRecord) {
         await this.cleanupIncidentMediaRollback(mediaRecord);
       }
@@ -1718,44 +1896,11 @@ export class ResidentsService {
         dashboardStatus: getDashboardTaskStatus(task),
       })),
     );
-
-    const overdueTasks = normalizedTasks.filter(
-      (task) => task.dashboardStatus === 'OVERDUE',
-    ).length;
-    const escalatedItems = normalizedTasks.filter(
-      (task) => task.dashboardStatus === 'ESCALATED',
-    ).length;
-    const unreadHandovers = activeShifts.reduce((total, activeShift) => {
-      const assignedUserIds = new Set(
-        activeShift.assignedUsers.map((user) => user.id),
-      );
-      const acknowledgedUserIds = new Set(
-        activeShift.handover?.acknowledgements.map(
-          (item) => item.acknowledgedById,
-        ) ?? [],
-      );
-
-      return (
-        total + Math.max(assignedUserIds.size - acknowledgedUserIds.size, 0)
-      );
-    }, 0);
-
-    const shiftElapsedRatio =
-      activeShifts.reduce((total, activeShift) => {
-        return (
-          total +
-          (Date.now() - activeShift.startsAt.getTime()) /
-            Math.max(
-              activeShift.endsAt.getTime() - activeShift.startsAt.getTime(),
-              1,
-            )
-        );
-      }, 0) / activeShifts.length;
-    const shiftCompletionPercent = this.clampNumber(
-      Math.round(shiftElapsedRatio * 100),
-      0,
-      100,
-    );
+    const metrics = buildManagerDashboardMetrics({
+      activeShifts,
+      normalizedTasks,
+      activeIncidentCount: incidents.length,
+    });
 
     const medicationExceptionFeed = medicationOverview.exceptions.map((entry) =>
       mapMedicationExceptionFeedItem({
@@ -1776,36 +1921,12 @@ export class ResidentsService {
       }),
     );
 
-    const exceptionFeed = [
-      ...incidents.map((incident) => mapIncidentExceptionFeedItem(incident)),
-      ...medicationExceptionFeed,
-      ...normalizedTasks
-        .filter((task) => task.focus !== 'MEDICATION')
-        .map((task) => {
-          const shiftScope = shiftById.get(task.shiftId);
-          if (!shiftScope) {
-            return null;
-          }
-
-          return mapTaskExceptionFeedItem(task, shiftScope);
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null),
-    ]
-      .sort((left, right) => {
-        if (left.rank !== right.rank) {
-          return left.rank - right.rank;
-        }
-
-        if (left.kind === 'INCIDENT' && right.kind === 'INCIDENT') {
-          return right.occurredAt.getTime() - left.occurredAt.getTime();
-        }
-
-        const leftDueAt = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const rightDueAt = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        return leftDueAt - rightDueAt;
-      })
-      .slice(0, 5)
-      .map((item) => stripRank(item));
+    const exceptionFeed = buildManagerDashboardExceptionFeed({
+      incidents,
+      medicationExceptionFeed,
+      normalizedTasks,
+      shiftById,
+    });
 
     const shiftStartsAt = new Date(
       Math.min(
@@ -1820,9 +1941,9 @@ export class ResidentsService {
     const complianceSeries = buildManagerComplianceSeries({
       shiftStartsAt,
       shiftEndsAt,
-      overdueTasks,
-      escalatedItems,
-      unreadHandovers,
+      overdueTasks: metrics.overdueTasks,
+      escalatedItems: metrics.escalatedItems,
+      unreadHandovers: metrics.unreadHandovers,
     });
 
     return {
@@ -1830,13 +1951,7 @@ export class ResidentsService {
       activeShifts: activeShifts.map((activeShift) =>
         this.toManagerShiftSummary(activeShift),
       ),
-      metrics: {
-        overdueTasks,
-        escalatedItems,
-        unreadHandovers,
-        shiftCompletionPercent,
-        activeIncidents: incidents.length,
-      },
+      metrics,
       activityFeed,
       exceptionFeed,
       complianceSeries,

@@ -5,7 +5,9 @@ import type {
   IncidentCategory,
   IncidentSeverity,
   IncidentStatus,
+  MedicationChartStatus,
   PersonalCareSubtype,
+  RoleKey,
   ResidentTimelineEntryType,
   TaskStatus,
 } from '@prisma/client';
@@ -32,6 +34,18 @@ export interface AuditEventDetails {
   fromStatus?: TaskStatus;
   toStatus?: TaskStatus;
   note?: string | null;
+  roomLabel?: string;
+  floorNumber?: number;
+  unitLabel?: string;
+  viewerRole?: RoleKey;
+  medicationContentVisible?: boolean;
+  activeIncidentCount?: number | null;
+  currentTaskCount?: number | null;
+  accessScope?: string;
+  chartStatus?: MedicationChartStatus | null;
+  scheduledMedicationCount?: number;
+  prnMedicationCount?: number;
+  recentEventCount?: number;
 }
 
 type AuditEventDetailStringKey = Exclude<

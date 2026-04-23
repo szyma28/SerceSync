@@ -4,17 +4,25 @@ import 'dart:io';
 import 'package:sercesync_web/manager_app.dart';
 
 void main() async {
+  final email =
+      Platform.environment['SERCESYNC_MANAGER_EMAIL'] ??
+      'manager@sercesync.local';
+  final password = Platform.environment['SERCESYNC_MANAGER_PASSWORD'];
+
+  if (password == null || password.trim().isEmpty) {
+    stderr.writeln(
+      'Set SERCESYNC_MANAGER_PASSWORD before running this debug tool.',
+    );
+    exitCode = 64;
+    return;
+  }
+
   final client = HttpClient();
   final loginRequest = await client.postUrl(
     Uri.parse('http://localhost:3000/auth/manager/login'),
   );
   loginRequest.headers.contentType = ContentType.json;
-  loginRequest.write(
-    jsonEncode({
-      'email': 'manager@sercesync.local',
-      'password': 'Password123!',
-    }),
-  );
+  loginRequest.write(jsonEncode({'email': email, 'password': password}));
   final loginResponse = await loginRequest.close();
   final cookies = loginResponse.cookies;
   await utf8.decoder.bind(loginResponse).join();

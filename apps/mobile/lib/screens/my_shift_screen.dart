@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/mobile_session_controller.dart';
 import '../controllers/shift_workspace_controller.dart';
 import '../models/workspace_models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/data_freshness_indicator.dart';
 import '../widgets/date_time_formatters.dart';
+import '../widgets/loading_skeleton.dart';
+import '../widgets/status_banner.dart';
 
 class MyShiftScreen extends StatelessWidget {
   const MyShiftScreen({super.key, required this.onLogout});
@@ -14,11 +18,48 @@ class MyShiftScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final workspaceController = context.watch<ShiftWorkspaceController>();
+    final sessionController = context.watch<MobileSessionController>();
     final currentShift = workspaceController.currentShift;
+    final snapshot = workspaceController.snapshot;
+    final showStatusBanner =
+        workspaceController.showingCachedOverviewData ||
+        workspaceController.overviewErrorMessage != null;
+    final freshnessIndicator =
+        !showStatusBanner &&
+            (workspaceController.overviewLastUpdatedAt != null ||
+                currentShift != null ||
+                snapshot != null)
+        ? DataFreshnessIndicator(
+            lastUpdatedAt: workspaceController.overviewLastUpdatedAt,
+            isRefreshing: workspaceController.isOverviewLoading,
+            label: 'Live shift overview',
+          )
+        : const SizedBox.shrink();
+
+    if (workspaceController.isOverviewLoading &&
+        currentShift == null &&
+        snapshot == null &&
+        workspaceController.overview == null) {
+      return Container(
+        decoration: AppTheme.atmosphericBackground,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            title: Text(
+              'My Shift',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+          body: const SafeArea(child: _MyShiftLoadingSkeleton()),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Text(
           'My Shift',
           style: Theme.of(context).textTheme.headlineSmall,
@@ -42,6 +83,40 @@ class MyShiftScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
             children: [
+              if (showStatusBanner)
+                StatusBanner(
+                  icon: workspaceController.overviewErrorMessage == null
+                      ? Icons.cloud_off_outlined
+                      : Icons.wifi_tethering_error_rounded,
+                  title: workspaceController.overviewErrorMessage == null
+                      ? 'Showing cached shift overview'
+                      : 'Using cached shift overview',
+                  message:
+                      workspaceController.overviewErrorMessage ??
+                      'Shift details will refresh when the connection comes back.',
+                  lastUpdatedAt: workspaceController.overviewLastUpdatedAt,
+                  actionLabel: 'Retry',
+                  onAction: () => context
+                      .read<ShiftWorkspaceController>()
+                      .refreshOverview(),
+                ),
+              freshnessIndicator,
+              if (sessionController.syncSummary.hasPendingWork)
+                StatusBanner(
+                  icon: sessionController.syncSummary.hasFailures
+                      ? Icons.sync_problem_rounded
+                      : Icons.sync_rounded,
+                  title: sessionController.syncSummary.headline,
+                  message:
+                      'Saved notes and incidents from this device are still waiting to sync.',
+                  actionLabel: sessionController.syncSummary.hasFailures
+                      ? 'Retry'
+                      : null,
+                  onAction: sessionController.syncSummary.hasFailures
+                      ? () =>
+                            sessionController.syncService.retryFailedMutations()
+                      : null,
+                ),
               _SectionCard(
                 title: 'Current Shift',
                 child: Column(
@@ -59,7 +134,9 @@ class MyShiftScreen extends StatelessWidget {
                       label: 'Assignment',
                       value: currentShift != null
                           ? '${currentShift.unitLabel} · Floor ${currentShift.floorNumber}'
-                          : '${workspaceController.snapshot.shift.unitLabel} · Floor ${workspaceController.snapshot.shift.floorNumber}',
+                          : snapshot != null
+                          ? '${snapshot.shift.unitLabel} · Floor ${snapshot.shift.floorNumber}'
+                          : 'Awaiting shift assignment',
                     ),
                     _InfoRow(
                       label: 'Shift',
@@ -68,25 +145,17 @@ class MyShiftScreen extends StatelessWidget {
                               currentShift.startsAt,
                               currentShift.endsAt,
                             )
-                          : formatHourMinuteRange(
-                              workspaceController.snapshot.shift.startsAt,
-                              workspaceController.snapshot.shift.endsAt,
-                            ),
+                          : snapshot != null
+                          ? formatHourMinuteRange(
+                              snapshot.shift.startsAt,
+                              snapshot.shift.endsAt,
+                            )
+                          : 'Shift time not loaded yet',
                     ),
                     _InfoRow(
                       label: 'Handover',
                       value: _handoverValue(workspaceController, currentShift),
                     ),
-                    if (workspaceController.overviewErrorMessage != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        workspaceController.overviewErrorMessage!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.errorRed,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -170,8 +239,13 @@ class MyShiftScreen extends StatelessWidget {
       return 'Pending acknowledgement';
     }
 
-    return workspaceController.snapshot.acknowledged
-        ? 'Acknowledged at ${formatHourMinute(workspaceController.snapshot.acknowledgedAt ?? workspaceController.snapshot.shift.startsAt)}'
+    final snapshot = workspaceController.snapshot;
+    if (snapshot == null) {
+      return 'Pending acknowledgement';
+    }
+
+    return snapshot.acknowledged
+        ? 'Acknowledged at ${formatHourMinute(snapshot.acknowledgedAt ?? snapshot.shift.startsAt)}'
         : 'Pending acknowledgement';
   }
 }
@@ -188,10 +262,17 @@ class _MedicationSummaryPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 12),
-          child: CircularProgressIndicator(color: AppTheme.primaryBlue),
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SkeletonBlock(height: 18, width: 190, radius: 10),
+            SizedBox(height: 12),
+            SkeletonBlock(height: 48, width: double.infinity, radius: 16),
+            SizedBox(height: 10),
+            SkeletonBlock(height: 48, width: double.infinity, radius: 16),
+          ],
         ),
       );
     }
@@ -276,6 +357,49 @@ class _MedicationSummaryPanel extends StatelessWidget {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _MyShiftLoadingSkeleton extends StatelessWidget {
+  const _MyShiftLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
+      children: const [
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 20, width: 120, radius: 12),
+              SizedBox(height: 16),
+              SkeletonBlock(height: 14, width: double.infinity, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: 230, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: 210, radius: 10),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 14, width: 180, radius: 10),
+            ],
+          ),
+        ),
+        SkeletonCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(height: 20, width: 150, radius: 12),
+              SizedBox(height: 16),
+              SkeletonBlock(height: 18, width: 170, radius: 10),
+              SizedBox(height: 12),
+              SkeletonBlock(height: 48, width: double.infinity, radius: 16),
+              SizedBox(height: 10),
+              SkeletonBlock(height: 48, width: double.infinity, radius: 16),
+            ],
+          ),
+        ),
       ],
     );
   }

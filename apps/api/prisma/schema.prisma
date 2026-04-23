@@ -104,12 +104,14 @@ enum AuditEventKind {
   TASK_COMPLETED
   TASK_DEFERRED
   TASK_ESCALATED
+  RESIDENT_RECORD_VIEWED
   RESIDENT_TIMELINE_ENTRY_CREATED
   RESIDENT_TIMELINE_MEDIA_ATTACHED
   INCIDENT_CREATED
   INCIDENT_MEDIA_ATTACHED
   INCIDENT_ACKNOWLEDGED
   INCIDENT_RESOLVED
+  MEDICATION_RECORD_VIEWED
   SHIFT_STARTED
   SHIFT_ENDED
   USER_LOGIN
@@ -235,6 +237,7 @@ model User {
   isActive                 Boolean                   @default(true)
   roleId                   String                    @db.Uuid
   role                     Role                      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  mobileRefreshSessions    MobileRefreshSession[]
   assignedTasks            Task[]                    @relation("AssignedTasks")
   assignedShifts           Shift[]                   @relation("AssignedShifts")
   auditEvents              AuditEvent[]
@@ -374,14 +377,16 @@ model ResidentTimelineEntry {
   mealIntakeAmount    MealIntakeAmount?
   title               String
   details             String
+  clientRequestId     String?                   @unique
   createdById         String?                   @db.Uuid
   createdBy           User?                     @relation(fields: [createdById], references: [id], onDelete: SetNull)
   shiftId             String?                   @db.Uuid
   shift               Shift?                    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   media               ResidentTimelineMedia[]
+  recordedAt          DateTime                  @default(now())
   createdAt           DateTime                  @default(now())
 
-  @@index([residentId, createdAt])
+  @@index([residentId, recordedAt])
   @@index([createdById])
   @@index([shiftId])
   @@map("resident_timeline_entries")
@@ -410,6 +415,7 @@ model Incident {
   resident         Resident         @relation(fields: [residentId], references: [id], onDelete: Cascade)
   shiftId          String           @db.Uuid
   shift            Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  clientRequestId  String?          @unique
   createdById      String?          @db.Uuid
   createdBy        User?            @relation("CreatedIncidents", fields: [createdById], references: [id], onDelete: SetNull)
   severity         IncidentSeverity
@@ -434,6 +440,21 @@ model Incident {
   @@index([acknowledgedById])
   @@index([resolvedById])
   @@map("incidents")
+}
+
+model MobileRefreshSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([userId, revokedAt])
+  @@map("mobile_refresh_sessions")
 }
 
 model IncidentMedia {

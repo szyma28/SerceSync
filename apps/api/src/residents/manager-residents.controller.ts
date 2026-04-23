@@ -7,6 +7,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
@@ -26,6 +27,12 @@ export class ManagerResidentsController {
   }
 
   @Post()
+  @Throttle({
+    default: {
+      limit: 20,
+      ttl: 60_000,
+    },
+  })
   createResident(@Body() createManagerResidentDto: CreateManagerResidentDto) {
     return this.residentsService.createManagerResident(
       createManagerResidentDto,
@@ -33,6 +40,12 @@ export class ManagerResidentsController {
   }
 
   @Patch(':id')
+  @Throttle({
+    default: {
+      limit: 20,
+      ttl: 60_000,
+    },
+  })
   updateResident(
     @Param('id') residentId: string,
     @Body() updateManagerResidentDto: UpdateManagerResidentDto,

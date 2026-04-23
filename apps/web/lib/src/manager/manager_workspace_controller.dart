@@ -8,10 +8,15 @@ import 'manager_models.dart';
 import 'manager_theme.dart';
 
 class ManagerWorkspaceController extends ChangeNotifier {
-  ManagerWorkspaceController({required this.apiClient, required this.session});
+  ManagerWorkspaceController({
+    required this.apiClient,
+    required this.session,
+    required this.renewSessionSilently,
+  });
 
   final SerceSyncManagerApiClient apiClient;
   final ManagerSession session;
+  final Future<bool> Function() renewSessionSilently;
 
   WorkspaceTab _selectedTab = WorkspaceTab.dashboard;
   ManagerDashboardSnapshot? _dashboard;
@@ -22,10 +27,13 @@ class ManagerWorkspaceController extends ChangeNotifier {
   bool _isSavingResident = false;
   String? _dashboardError;
   String? _residentsError;
+  DateTime? _dashboardLastUpdatedAt;
+  DateTime? _residentsLastUpdatedAt;
   final Set<String> _incidentActionIds = <String>{};
   int _dashboardLoadVersion = 0;
+  Future<bool>? _sessionRecovery;
   final Map<String, StreamSubscription<ManagerDashboardLiveUpdate>>
-      _dashboardLiveUpdatesSubscriptions = {};
+  _dashboardLiveUpdatesSubscriptions = {};
 
   WorkspaceTab get selectedTab => _selectedTab;
   ManagerDashboardSnapshot? get dashboard => _dashboard;
@@ -36,6 +44,8 @@ class ManagerWorkspaceController extends ChangeNotifier {
   bool get isSavingResident => _isSavingResident;
   String? get dashboardError => _dashboardError;
   String? get residentsError => _residentsError;
+  DateTime? get dashboardLastUpdatedAt => _dashboardLastUpdatedAt;
+  DateTime? get residentsLastUpdatedAt => _residentsLastUpdatedAt;
   Set<String> get pendingIncidentIds => _incidentActionIds;
 
   String get headerTitle {
@@ -56,8 +66,73 @@ class ManagerWorkspaceController extends ChangeNotifier {
     unawaited(loadResidents());
   }
 
+  void _sortResidents(List<ManagerResidentRecord> residents) {
+    residents.sort((left, right) {
+      final floorOrder = left.floorNumber.compareTo(right.floorNumber);
+      if (floorOrder != 0) {
+        return floorOrder;
+      }
+
+      final unitOrder = left.unitLabel.compareTo(right.unitLabel);
+      if (unitOrder != 0) {
+        return unitOrder;
+      }
+
+      final roomOrder = left.roomNumber.compareTo(right.roomNumber);
+      if (roomOrder != 0) {
+        return roomOrder;
+      }
+
+      return left.fullName.compareTo(right.fullName);
+    });
+  }
+
   bool _isCurrentDashboardLoad(int loadVersion) {
     return loadVersion == _dashboardLoadVersion;
+  }
+
+  String _describeRequestError(
+    Object error, {
+    required String unavailableMessage,
+  }) {
+    if (error is ApiException) {
+      if (error.statusCode == 401) {
+        return 'Your manager session expired. Sign in again to continue.';
+      }
+      return error.message;
+    }
+
+    return unavailableMessage;
+  }
+
+  Future<bool> _recoverSession() {
+    final activeRecovery = _sessionRecovery;
+    if (activeRecovery != null) {
+      return activeRecovery;
+    }
+
+    final recovery = renewSessionSilently();
+    _sessionRecovery = recovery.whenComplete(() {
+      _sessionRecovery = null;
+    });
+    return _sessionRecovery!;
+  }
+
+  Future<T> _runWithSessionRecovery<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
+    } on ApiException catch (error) {
+      if (error.statusCode != 401) {
+        rethrow;
+      }
+
+      final recovered = await _recoverSession();
+      if (!recovered) {
+        rethrow;
+      }
+
+      return operation();
+    }
   }
 
   void _cancelDashboardLiveUpdates() {
@@ -104,10 +179,7 @@ class ManagerWorkspaceController extends ChangeNotifier {
       _dashboardLiveUpdatesSubscriptions.putIfAbsent(
         shift.id,
         () => apiClient
-            .watchDashboard(
-              accessToken: session.accessToken,
-              shiftId: shift.id,
-            )
+            .watchDashboard(accessToken: session.accessToken, shiftId: shift.id)
             .listen(_handleDashboardLiveUpdate),
       );
     }
@@ -125,8 +197,8 @@ class ManagerWorkspaceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      activeShifts = await apiClient.getActiveShifts(
-        accessToken: session.accessToken,
+      activeShifts = await _runWithSessionRecovery(
+        () => apiClient.getActiveShifts(accessToken: session.accessToken),
       );
 
       if (!_isCurrentDashboardLoad(loadVersion)) return;
@@ -134,23 +206,30 @@ class ManagerWorkspaceController extends ChangeNotifier {
       if (activeShifts.isEmpty) {
         _activeShifts = const [];
         _dashboard = null;
+        _dashboardLastUpdatedAt = DateTime.now();
         _syncDashboardLiveUpdates();
         return;
       }
 
-      final dashboard = await apiClient.getDashboard(
-        accessToken: session.accessToken,
+      final dashboard = await _runWithSessionRecovery(
+        () => apiClient.getDashboard(accessToken: session.accessToken),
       );
 
       if (!_isCurrentDashboardLoad(loadVersion)) return;
       _activeShifts = activeShifts;
       _dashboard = dashboard;
+      _dashboardLastUpdatedAt = DateTime.now();
       _syncDashboardLiveUpdates();
-    } on ApiException catch (error) {
+    } on Object catch (error) {
       if (!_isCurrentDashboardLoad(loadVersion)) return;
-      _activeShifts = activeShifts;
-      _dashboardError = error.message;
-      _dashboard = null;
+      if (activeShifts.isNotEmpty || _activeShifts.isEmpty) {
+        _activeShifts = activeShifts;
+      }
+      _dashboardError = _describeRequestError(
+        error,
+        unavailableMessage:
+            'The manager dashboard can’t reach the API right now. Keep this view open and refresh once the connection comes back.',
+      );
       _syncDashboardLiveUpdates();
     } finally {
       if (_isCurrentDashboardLoad(loadVersion)) {
@@ -166,30 +245,18 @@ class ManagerWorkspaceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final residents = await apiClient.getResidents(
-        accessToken: session.accessToken,
+      final residents = await _runWithSessionRecovery(
+        () => apiClient.getResidents(accessToken: session.accessToken),
       );
-      residents.sort((left, right) {
-        final floorOrder = left.floorNumber.compareTo(right.floorNumber);
-        if (floorOrder != 0) {
-          return floorOrder;
-        }
-
-        final unitOrder = left.unitLabel.compareTo(right.unitLabel);
-        if (unitOrder != 0) {
-          return unitOrder;
-        }
-
-        final roomOrder = left.roomNumber.compareTo(right.roomNumber);
-        if (roomOrder != 0) {
-          return roomOrder;
-        }
-
-        return left.fullName.compareTo(right.fullName);
-      });
+      _sortResidents(residents);
       _residents = residents;
-    } on ApiException catch (error) {
-      _residentsError = error.message;
+      _residentsLastUpdatedAt = DateTime.now();
+    } on Object catch (error) {
+      _residentsError = _describeRequestError(
+        error,
+        unavailableMessage:
+            'Resident records can’t reach the API right now. Keep this tab open and try again once the connection returns.',
+      );
     } finally {
       _isResidentsLoading = false;
       notifyListeners();
@@ -232,22 +299,30 @@ class ManagerWorkspaceController extends ChangeNotifier {
 
     try {
       if (residentId == null) {
-        await apiClient.createResident(
-          accessToken: session.accessToken,
-          draft: draft,
+        await _runWithSessionRecovery(
+          () => apiClient.createResident(
+            accessToken: session.accessToken,
+            draft: draft,
+          ),
         );
       } else {
-        await apiClient.updateResident(
-          accessToken: session.accessToken,
-          residentId: residentId,
-          draft: draft,
+        await _runWithSessionRecovery(
+          () => apiClient.updateResident(
+            accessToken: session.accessToken,
+            residentId: residentId,
+            draft: draft,
+          ),
         );
       }
 
       await loadResidents();
       return true;
-    } on ApiException catch (error) {
-      _residentsError = error.message;
+    } on Object catch (error) {
+      _residentsError = _describeRequestError(
+        error,
+        unavailableMessage:
+            'The resident record could not be saved because the API is unavailable right now.',
+      );
       notifyListeners();
       return false;
     } finally {
@@ -269,7 +344,7 @@ class ManagerWorkspaceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await action();
+      await _runWithSessionRecovery(action);
       await refreshOperationalData();
     } finally {
       _incidentActionIds.remove(incidentId);
