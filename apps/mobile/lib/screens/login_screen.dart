@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../config/api_base_url.dart';
 import '../controllers/mobile_session_controller.dart';
 import '../theme/app_theme.dart';
 
@@ -19,10 +20,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _hasAppliedSavedBaseUrl = false;
   final _apiBaseUrlController = TextEditingController(
-    text: const String.fromEnvironment(
-      'API_BASE_URL',
-      defaultValue: 'http://localhost:3000',
-    ),
+    text: defaultApiBaseUrl(),
   );
   final _emailController = TextEditingController(
     text: _enableDemoLoginPrefill ? 'carer@sercesync.local' : '',
