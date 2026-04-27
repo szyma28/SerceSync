@@ -193,7 +193,15 @@ cd apps/mobile
 flutter run --dart-define=API_BASE_URL=http://localhost:3000
 ```
 
-If `API_BASE_URL` is omitted, the app defaults to `http://localhost:3000`.
+If `API_BASE_URL` is omitted, iOS defaults to `http://localhost:3000` and the Android emulator defaults to `http://10.0.2.2:3000`.
+
+For Android emulator testing:
+
+```bash
+cd apps/mobile
+flutter emulators --launch Medium_Phone_API_34
+flutter run -d Medium_Phone_API_34
+```
 
 ### Web
 
